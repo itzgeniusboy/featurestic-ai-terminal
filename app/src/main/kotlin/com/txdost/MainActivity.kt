@@ -51,7 +51,14 @@ class MainActivity : ComponentActivity() {
         val convIdFromNotif = intent?.getStringExtra(TxDostService.EXTRA_CONV_ID)
 
         setContent {
-            FeaturesticTheme {
+            val prefs = remember { com.txdost.data.AppPreferences(applicationContext) }
+            val themeMode by prefs.themeMode.collectAsState(initial = "system")
+            val darkTheme = when (themeMode) {
+                "light" -> false
+                "dark"  -> true
+                else    -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            FeaturesticTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppNavigation(initialConvId = convIdFromNotif)
                 }

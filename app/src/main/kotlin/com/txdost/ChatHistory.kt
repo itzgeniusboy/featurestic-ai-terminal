@@ -42,9 +42,10 @@ class ChatHistoryManager(private val context: Context) {
                     id        = obj.getString("id"),
                     title     = obj.getString("title"),
                     createdAt = obj.getLong("createdAt"),
-                    updatedAt = obj.getLong("updatedAt")
+                    updatedAt = obj.getLong("updatedAt"),
+                    pinned    = obj.optBoolean("pinned", false)
                 )
-            }.sortedByDescending { it.updatedAt }
+            }.sortedWith(compareByDescending<Conversation> { it.pinned }.thenByDescending { it.updatedAt })
         } catch (e: Exception) {
             emptyList()
         }
@@ -58,6 +59,7 @@ class ChatHistoryManager(private val context: Context) {
                 put("title",     conv.title)
                 put("createdAt", conv.createdAt)
                 put("updatedAt", conv.updatedAt)
+                put("pinned",    conv.pinned)
             })
         }
         indexFile.writeText(arr.toString())
@@ -130,6 +132,15 @@ class ChatHistoryManager(private val context: Context) {
             // Top pe le aao
             val updated = list.removeAt(idx)
             list.add(0, updated)
+            saveIndex(list)
+        }
+    }
+
+    fun setPinned(convId: String, pinned: Boolean) {
+        val list = getAllConversations().toMutableList()
+        val idx  = list.indexOfFirst { it.id == convId }
+        if (idx >= 0) {
+            list[idx] = list[idx].copy(pinned = pinned)
             saveIndex(list)
         }
     }

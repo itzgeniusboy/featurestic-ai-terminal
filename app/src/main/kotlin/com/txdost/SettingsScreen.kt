@@ -76,6 +76,7 @@ fun SettingsScreen(
     val searchStored by remember { prefs.webSearchProvider }.collectAsState(initial = "DUCKDUCKGO")
     val tavilyStored by remember { prefs.tavilyApiKey }.collectAsState(initial = "")
     val firecrawlStored by remember { prefs.firecrawlApiKey }.collectAsState(initial = "")
+    val themeStored by remember { prefs.themeMode }.collectAsState(initial = "system")
 
     var systemPrompt by remember { mutableStateOf("") }
     var searchProvider by remember { mutableStateOf("DUCKDUCKGO") }
@@ -310,6 +311,19 @@ fun SettingsScreen(
                         }
                     )
                 }
+            }
+
+            AppleSectionHeader("Appearance")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleSegmentedControl(
+                    options = listOf("System", "Light", "Dark"),
+                    selectedIndex = when (themeStored) { "light" -> 1; "dark" -> 2; else -> 0 },
+                    onSelect = { idx ->
+                        val mode = when (idx) { 1 -> "light"; 2 -> "dark"; else -> "system" }
+                        scope.launch { prefs.saveThemeMode(mode) }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             Spacer(Modifier.height(20.dp))

@@ -25,6 +25,7 @@ class AppPreferences(private val context: Context) {
         val MODEL_CATALOG      = stringPreferencesKey("model_catalog")
         val AGENT_MODE         = stringPreferencesKey("agent_mode")
         val SKILLS_JSON        = stringPreferencesKey("skills_json")
+        val THEME_MODE         = stringPreferencesKey("theme_mode")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
         private fun modelKey(providerId: String) = stringPreferencesKey("model_$providerId")
@@ -71,6 +72,7 @@ class AppPreferences(private val context: Context) {
     // ── Agent mode + skills ──────────────────────────────────
     val agentMode: Flow<String> = context.dataStore.data.map { it[AGENT_MODE] ?: "build" }
     val skillsJson: Flow<String> = context.dataStore.data.map { it[SKILLS_JSON] ?: "" }
+    val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
 
     // ── Generation ───────────────────────────────────────────
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
@@ -97,6 +99,7 @@ class AppPreferences(private val context: Context) {
     suspend fun saveModelCatalog(json: String) = context.dataStore.edit { it[MODEL_CATALOG] = json }
     suspend fun saveAgentMode(mode: String) = context.dataStore.edit { it[AGENT_MODE] = mode }
     suspend fun saveSkills(json: String) = context.dataStore.edit { it[SKILLS_JSON] = json }
+    suspend fun saveThemeMode(mode: String) = context.dataStore.edit { it[THEME_MODE] = mode }
 
     /** Wipe every stored preference (keys, models, prompt, skills, catalog). */
     suspend fun clearAll() = context.dataStore.edit { it.clear() }

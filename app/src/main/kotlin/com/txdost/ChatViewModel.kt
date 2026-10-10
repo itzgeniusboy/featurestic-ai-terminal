@@ -1552,6 +1552,22 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
         }
     }
 
+    fun renameConversation(convId: String, title: String) {
+        val t = title.trim()
+        if (t.isEmpty()) return
+        viewModelScope.launch {
+            historyManager.updateConversationTitle(convId, t)
+            refreshConversations()
+        }
+    }
+
+    fun pinConversation(convId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            historyManager.setPinned(convId, pinned)
+            refreshConversations()
+        }
+    }
+
     fun toggleHistoryDrawer() {
         _uiState.update { it.copy(showHistoryDrawer = !it.showHistoryDrawer) }
     }

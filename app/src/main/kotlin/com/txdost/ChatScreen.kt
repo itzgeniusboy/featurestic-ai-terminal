@@ -206,6 +206,8 @@ fun ChatScreen(
                     onNewChat = { chatViewModel.newConversation() },
                     onSelect = { chatViewModel.switchConversation(it) },
                     onDelete = { chatViewModel.deleteConversation(it) },
+                    onRename = { id, title -> chatViewModel.renameConversation(id, title) },
+                    onPin = { id, pinned -> chatViewModel.pinConversation(id, pinned) },
                     onClose = { chatViewModel.closeHistoryDrawer() }
                 )
             }
@@ -817,10 +819,14 @@ fun HistoryDrawer(
     onNewChat: () -> Unit,
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onRename: (String, String) -> Unit = { _, _ -> },
+    onPin: (String, Boolean) -> Unit = { _, _ -> },
     onClose: () -> Unit
 ) {
     val c = Apple.colors
     var deleteTargetId by remember { mutableStateOf<String?>(null) }
+    var renameTargetId by remember { mutableStateOf<String?>(null) }
+    var renameText by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     val filtered = if (query.isBlank()) conversations
         else conversations.filter { it.title.contains(query, ignoreCase = true) }
@@ -903,6 +909,17 @@ fun HistoryDrawer(
                                 color = c.secondaryLabel
                             )
                         }
+                        IconButton(onClick = { onPin(conv.id, !conv.pinned) }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Rounded.PushPin,
+                                "Pin",
+                                tint = if (conv.pinned) c.blue else c.tertiaryLabel,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(onClick = { renameTargetId = conv.id; renameText = conv.title }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Edit, "Rename", tint = c.tertiaryLabel, modifier = Modifier.size(18.dp))
+                        }
                         IconButton(onClick = { deleteTargetId = conv.id }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Rounded.Delete, "Delete", tint = c.tertiaryLabel, modifier = Modifier.size(18.dp))
                         }
@@ -934,6 +951,32 @@ fun HistoryDrawer(
             },
             dismissButton = {
                 TextButton(onClick = { deleteTargetId = null }) { Text("Cancel", color = c.blue) }
+            }
+        )
+    }
+
+    if (renameTargetId != null) {
+        AlertDialog(
+            onDismissRequest = { renameTargetId = null },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = c.secondaryBg,
+            title = { Text("Rename chat", style = MaterialTheme.typography.titleMedium, color = c.label) },
+            text = {
+                AppleTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    placeholder = "Chat name",
+                    label = null
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    renameTargetId?.let { onRename(it, renameText) }
+                    renameTargetId = null
+                }) { Text("Save", color = c.blue, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTargetId = null }) { Text("Cancel", color = c.blue) }
             }
         )
     }
