@@ -30,9 +30,12 @@
 
 - 2026-10-11: Added in-app `TermuxSetupScreen` (Settings → TERMUX SETUP / CONNECT). Server script bundled as asset `app/src/main/assets/termux_install.sh` (self-contained — server.py embedded, no GitHub needed). Screen: 1-TAP CONNECT button (Termux RUN_COMMAND intent, script sent base64) + manual fallback (download to Downloads, copy `termux-setup-storage` and `bash ~/storage/downloads/featurestic-install.sh`). Added `TermuxBridge.runCommandViaTermux`, WRITE_EXTERNAL_STORAGE (maxSdk 28) in manifest. Base64 pipeline tested locally (19,288 chars decode+syntax OK). User never sees GitHub.
 
+- 2026-10-11: Global Apple/iOS redesign. New theme tokens `ui/theme/AppleTheme.kt` (LightApple/DarkApple, `Apple.colors`, `FeaturesticTheme`), `Type.kt`, `Shape.kt` (deleted old Color/Theme/OllamaAppTheme). Reusable `ui/components/AppleComponents.kt` (AppleScreen, AppleTopBar, AppleButton, AppleCard, AppleGroup, AppleRow, AppleSectionHeader, AppleTextField, AppleBadge, AppleSwitchRow, AppleSegmentedControl, AppleAlertDialog...). Rewrote ChatScreen (iMessage style), SettingsScreen, TermuxSetupScreen, DashboardScreen, FileScreen, FileExplorerScreen, ProcessManagerScreen. `MainActivity` uses FeaturesticTheme.
+- 2026-10-11: Fixes — SettingsScreen provider switch could not reassign `val providerId` → now saves via `prefs.saveProviderId`; Dashboard refresh button now calls suspend `fetchStats` inside `scope.launch`. CI-verified: run 38083945565 SUCCESS.
+- APK rebuilt + copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-debug.apk` (20.3 MB).
+
 ## Next Steps
-- Optional: in-app "Setup Server" button (Termux RUN_COMMAND intent) for fully 1-tap setup.
-- Optionally test each provider's live free-model fetch on-device.
+- Optional: test each provider's live free-model fetch on-device.
 - Optional: bump versionCode/versionName for release; add signed release build.
 
 ## Open Questions
