@@ -422,11 +422,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             // Fallback ne jo model chalaya, usko session ke liye yaad rakho
-            if (usedProvider != null && usedModel != null) {
-                currentApiKey = prefs.apiKeyFor(usedProvider).first()
-                currentModel = usedModel
-                llm.provider = ProviderRegistry.byId(usedProvider)
-                _uiState.update { it.copy(currentModel = usedModel) }
+            val okProvider = usedProvider
+            val okModel = usedModel
+            if (okProvider != null && okModel != null) {
+                currentApiKey = prefs.apiKeyFor(okProvider).first()
+                currentModel = okModel
+                llm.provider = ProviderRegistry.byId(okProvider)
+                _uiState.update { it.copy(currentModel = okModel) }
             }
 
             val aiResponse = sb.toString()
