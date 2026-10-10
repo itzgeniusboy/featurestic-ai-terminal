@@ -50,6 +50,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 @Composable
 fun SettingsScreen(
@@ -92,9 +94,21 @@ fun SettingsScreen(
     var isLoading by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var showPicker by remember { mutableStateOf(false) }
+    var loadingId by remember { mutableStateOf<String?>(null) }
+    val providerStatus = remember { mutableStateMapOf<String, String>() }
 
     val connected = chatViewModel?.uiState?.value?.termuxConnected == true
     val activeProviderName = ProviderRegistry.byId(providerId).name
+
+    fun saveCatalogToPrefs(map: Map<String, List<ModelInfo>>) {
+        val root = JSONObject()
+        map.forEach { (pid, list) ->
+            val arr = JSONArray()
+            list.forEach { arr.put(it.id) }
+            root.put(pid, arr)
+        }
+        scope.launch { prefs.saveModelCatalog(root.toString()) }
+    }
 
     fun connect() {
         isLoading = true
@@ -114,9 +128,26 @@ fun SettingsScreen(
             results.forEach { (id, list) -> if (list.isNotEmpty()) map[id] = list }
             modelsByProvider = map
             isLoading = false
+            saveCatalogToPrefs(map)
             val total = map.values.sumOf { it.size }
             status = if (total == 0) "No models found — check your API keys"
-            else "Connected · $total model(s) from ${map.size} provider(s)"
+            else "Connected · $total free model(s) from ${map.size} provider(s)"
+        }
+    }
+
+    fun connectOne(spec: ProviderSpec) {
+        val key = keys[spec.id].orEmpty().trim()
+        if (key.isBlank()) { providerStatus[spec.id] = "Enter a key first"; return }
+        loadingId = spec.id
+        providerStatus[spec.id] = "Connecting…"
+        scope.launch {
+            prefs.saveApiKeyFor(spec.id, key)
+            val list = LlmClient().getModels(spec, key).getOrDefault(emptyList())
+            val map = modelsByProvider + (spec.id to list)
+            modelsByProvider = map
+            providerStatus[spec.id] = if (list.isEmpty()) "No free models (check key)" else "${list.size} free model(s)"
+            saveCatalogToPrefs(map)
+            loadingId = null
         }
     }
 
@@ -128,7 +159,7 @@ fun SettingsScreen(
         }
     }
 
-    fun saveAll() {
+    fun saveSettings() {
         scope.launch {
             ProviderRegistry.all.forEach { spec -> prefs.saveApiKeyFor(spec.id, keys[spec.id].orEmpty().trim()) }
             prefs.saveSystemPrompt(systemPrompt)
@@ -176,24 +207,24 @@ fun SettingsScreen(
                 ProviderKeyCard(
                     spec = spec,
                     value = keys[spec.id].orEmpty(),
-                    onValueChange = { keys[spec.id] = it },
-                    isActive = spec.id == providerId
+                    onValueChange = {
+                        keys[spec.id] = it
+                        scope.launch { prefs.saveApiKeyFor(spec.id, it.trim()) }
+                    },
+                    isActive = spec.id == providerId,
+                    status = providerStatus[spec.id],
+                    isConnecting = loadingId == spec.id,
+                    onConnect = { connectOne(spec) }
                 )
             }
-            Spacer(Modifier.height(10.dp))
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                AppleButton(
-                    "Connect & load models",
-                    { connect() },
-                    Modifier.fillMaxWidth(),
-                    style = AppleButtonStyle.Filled,
-                    icon = Icons.Rounded.Cloud,
-                    loading = isLoading
+            if (status.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.secondaryLabel,
+                    modifier = Modifier.padding(horizontal = 20.dp)
                 )
-                if (status.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(status, style = MaterialTheme.typography.bodySmall, color = c.secondaryLabel)
-                }
             }
 
             // ── Models ─────────────────────────────────────────
@@ -201,14 +232,14 @@ fun SettingsScreen(
             AppleGroup {
                 AppleRow(
                     title = "Active model",
-                    subtitle = if (activeModel.isBlank()) "None selected — tap to switch"
+                    subtitle = if (activeModel.isBlank()) "None selected — tap to choose"
                     else "$activeProviderName · $activeModel",
                     icon = Icons.Rounded.Memory,
                     showChevron = true,
                     showDivider = false,
                     onClick = {
-                        if (modelsByProvider.isNotEmpty()) showPicker = true
-                        else status = "Tap Connect & load models first"
+                        if (modelsByProvider.isEmpty()) connect()
+                        showPicker = true
                     }
                 )
             }
@@ -274,7 +305,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(20.dp))
             Column(Modifier.padding(horizontal = 16.dp)) {
-                AppleButton("Save changes", { saveAll() }, modifier = Modifier.fillMaxWidth())
+                AppleButton("Save prompt & search", { saveSettings() }, modifier = Modifier.fillMaxWidth())
             }
             Spacer(Modifier.height(40.dp))
         }
@@ -303,7 +334,10 @@ private fun ProviderKeyCard(
     spec: ProviderSpec,
     value: String,
     onValueChange: (String) -> Unit,
-    isActive: Boolean
+    isActive: Boolean,
+    status: String? = null,
+    isConnecting: Boolean = false,
+    onConnect: () -> Unit = {}
 ) {
     val c = Apple.colors
     var visible by remember { mutableStateOf(false) }
@@ -327,6 +361,26 @@ private fun ProviderKeyCard(
                     }
                 }
             )
+            if (value.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AppleButton(
+                        "Connect",
+                        onConnect,
+                        style = AppleButtonStyle.Tinted,
+                        icon = Icons.Rounded.Bolt,
+                        loading = isConnecting,
+                        enabled = !isConnecting
+                    )
+                    if (status != null) {
+                        Spacer(Modifier.width(10.dp))
+                        Text(status, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
+                    }
+                }
+            } else if (status != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(status, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
+            }
         }
     }
 }

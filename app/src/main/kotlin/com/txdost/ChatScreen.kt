@@ -43,7 +43,6 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToFiles: () -> Unit,
-    onNavigateToDashboard: () -> Unit = {},
     chatViewModel: ChatViewModel = viewModel()
 ) {
     val uiState by chatViewModel.uiState.collectAsState()
@@ -98,7 +97,6 @@ fun ChatScreen(
                 onClear = { showClearDialog = true },
                 onSchedule = { showScheduleDialog = true },
                 onFiles = onNavigateToFiles,
-                onDashboard = onNavigateToDashboard,
                 onSettings = onNavigateToSettings
             )
 
@@ -219,7 +217,6 @@ private fun ChatNavBar(
     onClear: () -> Unit,
     onSchedule: () -> Unit,
     onFiles: () -> Unit,
-    onDashboard: () -> Unit,
     onSettings: () -> Unit
 ) {
     val c = Apple.colors
@@ -245,7 +242,6 @@ private fun ChatNavBar(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     AppleMenuItem("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
                     AppleMenuItem("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
-                    AppleMenuItem("Dashboard", Icons.Rounded.Dashboard) { menu = false; onDashboard() }
                     AppleMenuItem("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
                     AppleMenuItem("Settings", Icons.Rounded.Settings) { menu = false; onSettings() }
                     HorizontalDivider()
@@ -334,11 +330,14 @@ private fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
             Spacer(Modifier.width(8.dp))
         }
         Column(
-            Modifier.widthIn(max = 300.dp),
+            Modifier
+                .then(if (isUser) Modifier.widthIn(max = 300.dp) else Modifier.weight(1f))
+                .fillMaxWidth(),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
             Box(
                 Modifier
+                    .then(if (isUser) Modifier else Modifier.fillMaxWidth())
                     .clip(
                         RoundedCornerShape(
                             topStart = 18.dp,

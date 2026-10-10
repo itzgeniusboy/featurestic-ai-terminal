@@ -369,22 +369,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } else "None"
 
             val sb = StringBuilder()
+            val candidates = buildFallbackCandidates()
+            var lastError: String? = null
+            var usedProvider: String? = null
+            var usedModel: String? = null
             try {
                 withTimeout(90_000L) {
-                    llm.chatStream(
-                        apiKey = currentApiKey,
-                        model = currentModel,
-                        messages = updatedMessages,
-                        systemPrompt = buildSystemPrompt(termuxLive, deviceInfo, procsInfo),
-                        fileContext = _uiState.value.selectedFileContext
-                    ).collect { token ->
-                        ensureActive()
-                        if (token.startsWith("[ERROR]")) {
-                            _uiState.update { it.copy(isGenerating = false, error = token, streamingText = "") }
-                            return@collect
+                    for (cand in candidates) {
+                        val spec = ProviderRegistry.byId(cand.first)
+                        val key = prefs.apiKeyFor(cand.first).first()
+                        llm.provider = spec
+                        val localSb = StringBuilder()
+                        var localErr: String? = null
+                        llm.chatStream(
+                            apiKey = key,
+                            model = cand.second,
+                            messages = updatedMessages,
+                            systemPrompt = buildSystemPrompt(termuxLive, deviceInfo, procsInfo),
+                            fileContext = _uiState.value.selectedFileContext
+                        ).collect { token ->
+                            ensureActive()
+                            if (token.startsWith("[ERROR]")) localErr = token
+                            else {
+                                localSb.append(token)
+                                _uiState.update { it.copy(streamingText = sb.toString() + localSb.toString()) }
+                            }
                         }
-                        sb.append(token)
-                        _uiState.update { it.copy(streamingText = sb.toString()) }
+                        if (localSb.isNotEmpty()) {
+                            sb.append(localSb)
+                            usedProvider = cand.first
+                            usedModel = cand.second
+                            break
+                        }
+                        lastError = localErr ?: "empty response"
                     }
                 }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
@@ -404,9 +421,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
+            // Fallback ne jo model chalaya, usko session ke liye yaad rakho
+            if (usedProvider != null && usedModel != null) {
+                currentApiKey = prefs.apiKeyFor(usedProvider).first()
+                currentModel = usedModel
+                llm.provider = ProviderRegistry.byId(usedProvider)
+                _uiState.update { it.copy(currentModel = usedModel) }
+            }
+
             val aiResponse = sb.toString()
             if (aiResponse.isEmpty()) {
-                if (_uiState.value.error == null) _uiState.update { it.copy(isGenerating = false) }
+                _uiState.update { it.copy(isGenerating = false, streamingText = "",
+                    error = (lastError ?: "No response") +
+                        "\n\n_(Tried all available free models — add another provider key in Settings.)_") }
                 return@launch
             }
 
@@ -955,6 +982,31 @@ Now answer the user based on these ACTUAL real-time results.
             historyManager.touchConversation(convId)
             refreshConversations()
         }
+    }
+
+    // ── Auto-fallback: ordered (providerId, modelId) candidates ──
+    private suspend fun buildFallbackCandidates(): List<Pair<String, String>> {
+        val out = LinkedHashSet<Pair<String, String>>()
+        val pid = prefs.providerId.first()
+        val model = prefs.modelFor(pid).first()
+        if (prefs.apiKeyFor(pid).first().isNotBlank() && model.isNotBlank()) out.add(pid to model)
+        val catalogJson = prefs.modelCatalog.first()
+        if (catalogJson.isNotBlank()) {
+            try {
+                val root = JSONObject(catalogJson)
+                root.keys().forEach { p ->
+                    if (prefs.apiKeyFor(p).first().isNotBlank()) {
+                        val arr = root.optJSONArray(p)
+                        if (arr != null) for (i in 0 until arr.length()) {
+                            val m = arr.optString(i)
+                            if (m.isNotBlank()) out.add(p to m)
+                        }
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+        if (out.isEmpty() && currentModel.isNotBlank()) out.add(prefs.providerId.first() to currentModel)
+        return out.toList()
     }
 
     private fun buildSystemPrompt(termuxConnected: Boolean, deviceInfo: String, activeProcs: String): String {

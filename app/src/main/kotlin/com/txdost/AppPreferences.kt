@@ -22,6 +22,7 @@ class AppPreferences(private val context: Context) {
         val USE_TERMUX_PROXY   = booleanPreferencesKey("use_termux_proxy")
         val TERMUX_PROXY_URL   = stringPreferencesKey("termux_proxy_url")
         val GLOBAL_SYSTEM_PROMPT = stringPreferencesKey("global_system_prompt")
+        val MODEL_CATALOG      = stringPreferencesKey("model_catalog")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
         private fun modelKey(providerId: String) = stringPreferencesKey("model_$providerId")
@@ -62,6 +63,9 @@ class AppPreferences(private val context: Context) {
         it[TERMUX_PROXY_URL] ?: "http://127.0.0.1:8080/v1"
     }
 
+    // ── Free-model catalog (JSON) for auto-fallback ──────────
+    val modelCatalog: Flow<String> = context.dataStore.data.map { it[MODEL_CATALOG] ?: "" }
+
     // ── Generation ───────────────────────────────────────────
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
         it[GLOBAL_SYSTEM_PROMPT]
@@ -84,4 +88,5 @@ class AppPreferences(private val context: Context) {
     suspend fun saveUseTermuxProxy(enabled: Boolean) = context.dataStore.edit { it[USE_TERMUX_PROXY] = enabled }
     suspend fun saveTermuxProxyUrl(url: String) = context.dataStore.edit { it[TERMUX_PROXY_URL] = url }
     suspend fun saveGlobalSystemPrompt(prompt: String) = context.dataStore.edit { it[GLOBAL_SYSTEM_PROMPT] = prompt }
+    suspend fun saveModelCatalog(json: String) = context.dataStore.edit { it[MODEL_CATALOG] = json }
 }
