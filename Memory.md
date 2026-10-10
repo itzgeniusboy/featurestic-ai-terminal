@@ -22,11 +22,15 @@
 - Keep package `com.txdost` and class `TxDostService`.
 - Cannot compile locally (no Android SDK) → GitHub Actions builds the APK.
 
+- 2026-10-11: Regenerated launcher icons (drawable PNG 512 + mipmap webp all dpis) from the SUN source jpg with pillow 12.3. Added `.gitignore`.
+- 2026-10-11: Added `.github/workflows/android-build.yml` (JDK 17, preinstalled runner SDK — do NOT add android-actions/setup-android, its default `tools` package fails). Created public repo `itzgeniusboy/featurestic-ai-terminal`, pushed, CI build SUCCESS (run 38080301678). APK copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-debug.apk`.
+- 2026-10-11: Verified built APK — label "Featurestic AI Terminal", new icon embedded, zero `TX_Dost`/`TX_DOST` display strings (only `com.txdost` package/`TxDostService` kept by design).
+
 ## Next Steps
-- Replace launcher icon from `/storage/emulated/0/Download/SUN Source Code/1791659717564.jpg` (resize with pillow → drawable + mipmap webp + round).
-- Add `.github/workflows/android-build.yml`, `gh repo create` new repo, commit + push, verify Actions build.
-- Provide docs/README for Termux proxy server (script not in repo; app expects passthrough at 127.0.0.1:8080/v1).
+- Provide docs/README for the Termux proxy server (script not in repo; app expects passthrough at 127.0.0.1:8080/v1 with `X-Provider-Base`).
+- Optionally test each provider's live free-model fetch on-device.
+- Optional: bump versionCode/versionName for release; add signed release build.
 
 ## Open Questions
 - Termux proxy server implementation (X-Provider-Base passthrough) — user must supply.
-- GitHub repo name/visibility for `gh repo create`.
+- Whether to rename package `com.txdost` / class `TxDostService` (currently kept intentionally).
