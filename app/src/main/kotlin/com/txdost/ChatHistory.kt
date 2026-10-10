@@ -14,7 +14,8 @@ data class Conversation(
     val title: String,
     val createdAt: Long,
     val updatedAt: Long,
-    val messages: List<ChatMessage> = emptyList()
+    val messages: List<ChatMessage> = emptyList(),
+    val pinned: Boolean = false
 )
 
 // ── ChatHistoryManager ───────────────────────────────────────
