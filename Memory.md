@@ -26,11 +26,12 @@
 - 2026-10-11: Added `.github/workflows/android-build.yml` (JDK 17, preinstalled runner SDK — do NOT add android-actions/setup-android, its default `tools` package fails). Created public repo `itzgeniusboy/featurestic-ai-terminal`, pushed, CI build SUCCESS (run 38080301678). APK copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-debug.apk`.
 - 2026-10-11: Verified built APK — label "Featurestic AI Terminal", new icon embedded, zero `TX_Dost`/`TX_DOST` display strings (only `com.txdost` package/`TxDostService` kept by design).
 
+- 2026-10-11: Added `termux/server.py` (bridge v6.0 — rebranded, keeps all v5.1 endpoints + NEW OpenAI model-proxy `/v1/chat/completions` & `/v1/models` using `X-Provider-Base` header) and `termux/install.sh` (one-line installer: permission + python/curl + download server + ~/.bashrc autostart + start + ping). Verified locally on Termux: /ping, /run, /info, /write, /file, and proxy streaming through a mock provider all pass; missing-header returns 400.
+
 ## Next Steps
-- Provide docs/README for the Termux proxy server (script not in repo; app expects passthrough at 127.0.0.1:8080/v1 with `X-Provider-Base`).
+- Optional: in-app "Setup Server" button (Termux RUN_COMMAND intent) for fully 1-tap setup.
 - Optionally test each provider's live free-model fetch on-device.
 - Optional: bump versionCode/versionName for release; add signed release build.
 
 ## Open Questions
-- Termux proxy server implementation (X-Provider-Base passthrough) — user must supply.
 - Whether to rename package `com.txdost` / class `TxDostService` (currently kept intentionally).
