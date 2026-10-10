@@ -33,6 +33,7 @@
 - 2026-10-11: Global Apple/iOS redesign. New theme tokens `ui/theme/AppleTheme.kt` (LightApple/DarkApple, `Apple.colors`, `FeaturesticTheme`), `Type.kt`, `Shape.kt` (deleted old Color/Theme/OllamaAppTheme). Reusable `ui/components/AppleComponents.kt` (AppleScreen, AppleTopBar, AppleButton, AppleCard, AppleGroup, AppleRow, AppleSectionHeader, AppleTextField, AppleBadge, AppleSwitchRow, AppleSegmentedControl, AppleAlertDialog...). Rewrote ChatScreen (iMessage style), SettingsScreen, TermuxSetupScreen, DashboardScreen, FileScreen, FileExplorerScreen, ProcessManagerScreen. `MainActivity` uses FeaturesticTheme.
 - 2026-10-11: Fixes — SettingsScreen provider switch could not reassign `val providerId` → now saves via `prefs.saveProviderId`; Dashboard refresh button now calls suspend `fetchStats` inside `scope.launch`. CI-verified: run 38083945565 SUCCESS.
 - APK rebuilt + copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-debug.apk` (20.3 MB).
+- 2026-10-11: Bumped versionCode 1→2, versionName 1.0→1.1. CI run 38084421178 SUCCESS. APK copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-v1.1-debug.apk`.
 
 ## Next Steps
 - Optional: test each provider's live free-model fetch on-device.
