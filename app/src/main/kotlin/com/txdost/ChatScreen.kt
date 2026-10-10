@@ -4,15 +4,20 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -22,25 +27,11 @@ import androidx.compose.ui.unit.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.txdost.data.ChatMessage
 import com.txdost.data.Conversation
+import com.txdost.ui.components.*
+import com.txdost.ui.theme.Apple
 import com.txdost.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 
-// ── Hacker Color Palette ────────────────────────────────────
-private val HackerBg       = Color(0xFF060D06)
-private val HackerBgCard   = Color(0xFF0F1A0F)
-private val HackerGreen    = Color(0xFF00FF41)
-private val HackerGreenDim = Color(0xFF00C832)
-private val HackerCyan     = Color(0xFF00E5FF)
-private val HackerYellow   = Color(0xFFFFD700)
-private val HackerRed      = Color(0xFFFF1744)
-private val HackerGray     = Color(0xFF1A2A1A)
-private val HackerBorder   = Color(0xFF003300)
-private val HackerUserBg   = Color(0xFF002244)   // Deep blue tint for user
-private val HackerAiBg     = Color(0xFF0A120A)   // Deep dark green for AI
-private val HackerUserAccent = Color(0xFF00B8FF) // User bubble border
-private val HackerAiAccent   = Color(0xFF00FF41) // AI bubble border
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     onNavigateToSettings: () -> Unit,
@@ -54,173 +45,75 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     var showClearDialog by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
+    val c = Apple.colors
 
-    // Auto-scroll logic:
-    // - Naya message aaye (size change) → hamesha bottom pe scroll
-    // - Streaming chal raha ho → sirf tab scroll karo jab user already bottom ke paas ho
     val totalItems = uiState.messages.size + if (uiState.streamingText.isNotEmpty()) 1 else 0
 
     LaunchedEffect(uiState.messages.size) {
-        if (totalItems > 0) {
-            coroutineScope.launch { listState.animateScrollToItem(totalItems - 1) }
-        }
+        if (totalItems > 0) coroutineScope.launch { listState.animateScrollToItem(totalItems - 1) }
     }
-
     LaunchedEffect(uiState.streamingText.length) {
         if (uiState.streamingText.isNotEmpty()) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val isNearBottom = lastVisible >= totalItems - 3
-            if (isNearBottom) {
-                coroutineScope.launch { listState.animateScrollToItem(totalItems - 1) }
-            }
+            if (lastVisible >= totalItems - 3) coroutineScope.launch { listState.animateScrollToItem(totalItems - 1) }
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(HackerBg)
-            .imePadding()
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().background(c.bg).imePadding()) {
+        Column(Modifier.fillMaxSize()) {
 
-            // ── TopBar ──────────────────────────────────────
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF000A00))
-                    .border(BorderStroke(1.dp, HackerBorder))
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Status dot
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(
-                                if (uiState.ollamaOnline) HackerGreen else HackerRed,
-                                CircleShape
-                            )
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "FEATURESTIC // AI TERMINAL",
-                        color = HackerGreen,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 1.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    // Action buttons — compact
-                    IconButton(onClick = { chatViewModel.toggleHistoryDrawer() }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Menu, contentDescription = "History", tint = HackerYellow, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = onNavigateToDashboard, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.BarChart, contentDescription = "Dashboard", tint = HackerCyan, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = onNavigateToFiles, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Folder, contentDescription = "Files", tint = HackerGreen, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = onNavigateToProcesses, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Processes", tint = HackerCyan, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = { showClearDialog = true }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear", tint = HackerRed, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = { showScheduleDialog = true }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.DateRange, contentDescription = "Schedule", tint = HackerYellow, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = onNavigateToSettings, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = HackerGreenDim, modifier = Modifier.size(16.dp))
-                    }
-                }
-                // Status pills — second line, horizontal scroll
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(top = 4.dp)
-                ) {
-                    item { StatusPill(text = if (uiState.ollamaOnline) "CLOUD:ON" else "CLOUD:OFF", active = uiState.ollamaOnline) }
-                    item { StatusPill(text = if (uiState.termuxConnected) "TERMUX:ON" else "TERMUX:OFF", active = uiState.termuxConnected) }
-                    item { StatusPill(text = uiState.providerId.uppercase(), active = true, color = Color(0xFF00E5FF)) }
-                    item { StatusPill(text = uiState.currentModel, active = true) }
-                    if (uiState.activeProcesses.isNotEmpty()) {
-                        item { StatusPill(text = "${uiState.activeProcesses.size} PROC", active = true) }
-                    }
-                }
-            }
+            ChatNavBar(
+                online = uiState.ollamaOnline,
+                subtitle = uiState.currentModel.ifBlank { uiState.providerId },
+                onHistory = { chatViewModel.toggleHistoryDrawer() },
+                onNewChat = { chatViewModel.newConversation() },
+                onClear = { showClearDialog = true },
+                onSchedule = { showScheduleDialog = true },
+                onFiles = onNavigateToFiles,
+                onProcesses = onNavigateToProcesses,
+                onDashboard = onNavigateToDashboard,
+                onSettings = onNavigateToSettings
+            )
 
-            // File context banner
-            if (uiState.selectedFileContext.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF001400))
-                        .border(BorderStroke(1.dp, HackerGreenDim))
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        ">> FILE_CTX LOADED",
-                        color = HackerGreenDim,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(
-                        onClick = { chatViewModel.clearFileContext() },
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text("[CLEAR]", color = HackerRed, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    }
-                }
-            }
-
-            // Error banner
-            if (uiState.error != null) {
-                Text(
-                    text = "!! ERROR: ${uiState.error}",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF1A0000))
-                        .border(BorderStroke(1.dp, HackerRed))
-                        .padding(8.dp),
-                    color = HackerRed,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
+            Column(Modifier.fillMaxWidth().background(c.bg).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                AppleScrollingChips(
+                    items = buildList {
+                        add(("Cloud" to uiState.ollamaOnline))
+                        add(("Termux" to uiState.termuxConnected))
+                        add((uiState.providerId.replaceFirstChar { it.uppercase() } to true))
+                        if (uiState.activeProcesses.isNotEmpty()) add(("${uiState.activeProcesses.size} running" to true))
+                    },
+                    modifier = Modifier.padding(horizontal = 0.dp)
                 )
             }
 
-            // ── Messages ────────────────────────────────────
+            if (uiState.selectedFileContext.isNotEmpty()) {
+                ContextBanner(onClear = { chatViewModel.clearFileContext() })
+            }
+
+            uiState.error?.let { err ->
+                ErrorBanner(err)
+            }
+
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (uiState.messages.isEmpty() && uiState.streamingText.isEmpty()) {
-                    item { EmptyStateHacker() }
+                    item { EmptyChatState(termuxConnected = uiState.termuxConnected) }
                 }
-                items(uiState.messages) { msg -> HackerMessageBubble(msg) }
+                items(uiState.messages) { msg -> MessageBubble(msg) }
                 if (uiState.streamingText.isNotEmpty()) {
-                    item {
-                        HackerMessageBubble(
-                            ChatMessage("assistant", uiState.streamingText),
-                            isStreaming = true
-                        )
-                    }
+                    item { MessageBubble(ChatMessage("assistant", uiState.streamingText), isStreaming = true) }
                 }
                 if (uiState.isGenerating && uiState.streamingText.isEmpty()) {
-                    item { HackerTypingIndicator() }
+                    item { TypingBubble() }
                 }
             }
 
-            // ── Input Bar ───────────────────────────────────
-            HackerInputBar(
+            ChatInputBar(
                 value = uiState.currentInput,
                 onValueChange = { chatViewModel.updateInput(it) },
                 onSend = { chatViewModel.sendMessage(uiState.currentInput) },
@@ -230,42 +123,32 @@ fun ChatScreen(
             )
         }
 
-        // ── History Drawer Overlay ──────────────────────────────
         if (uiState.showHistoryDrawer) {
-            // Background dim tap to close
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).clickable { chatViewModel.closeHistoryDrawer() })
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .clickable { chatViewModel.closeHistoryDrawer() }
-            )
-            // Drawer panel — left se slide
-            Box(
-                modifier = Modifier
+                Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(0.82f)
+                    .fillMaxWidth(0.84f)
                     .align(Alignment.CenterStart)
-                    .background(Color(0xFF050F05))
-                    .border(BorderStroke(1.dp, HackerGreen.copy(alpha = 0.4f)))
+                    .background(c.bg)
                     .clickable(enabled = false) {}
             ) {
                 HistoryDrawer(
-                    conversations  = uiState.conversations,
-                    activeConvId   = uiState.activeConvId,
+                    conversations = uiState.conversations,
+                    activeConvId = uiState.activeConvId,
                     historyManager = chatViewModel.historyManager,
-                    onNewChat      = { chatViewModel.newConversation() },
-                    onSelect       = { chatViewModel.switchConversation(it) },
-                    onDelete       = { chatViewModel.deleteConversation(it) },
-                    onClose        = { chatViewModel.closeHistoryDrawer() }
+                    onNewChat = { chatViewModel.newConversation() },
+                    onSelect = { chatViewModel.switchConversation(it) },
+                    onDelete = { chatViewModel.deleteConversation(it) },
+                    onClose = { chatViewModel.closeHistoryDrawer() }
                 )
             }
         }
     }
 
-    // Schedule dialog
     if (showScheduleDialog) {
         ScheduleResearchDialog(
-            onDismiss  = { showScheduleDialog = false },
+            onDismiss = { showScheduleDialog = false },
             onSchedule = { topic, triggerMs, repeat ->
                 chatViewModel.scheduleResearch(topic, triggerMs, repeat)
                 showScheduleDialog = false
@@ -273,422 +156,678 @@ fun ChatScreen(
         )
     }
 
-    // Clear dialog
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            containerColor = Color(0xFF0A0A0A),
-            titleContentColor = HackerRed,
-            textContentColor = HackerGreen,
-            title = { Text("[ CLEAR SESSION? ]", fontFamily = FontFamily.Monospace) },
-            text = { Text("All messages will be wiped from memory.", fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = c.secondaryBg,
+            title = { Text("Clear chat?", style = MaterialTheme.typography.titleMedium, color = c.label) },
+            text = { Text("Aapki saari messages hata di jayengi.", color = c.secondaryLabel) },
             confirmButton = {
                 TextButton(onClick = { chatViewModel.clearChat(); showClearDialog = false }) {
-                    Text("[CONFIRM]", color = HackerRed, fontFamily = FontFamily.Monospace)
+                    Text("Clear", color = c.red, fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
-                    Text("[ABORT]", color = HackerGreenDim, fontFamily = FontFamily.Monospace)
+                    Text("Cancel", color = c.blue)
                 }
             }
         )
     }
 }
 
+// ── Nav bar ──────────────────────────────────────────────────
+
 @Composable
-fun StatusPill(text: String, active: Boolean, color: Color? = null) {
-    val pillColor = color ?: if (active) HackerGreen else HackerRed
-    Text(
-        text = text,
-        color = pillColor,
-        fontSize = 9.sp,
-        fontFamily = FontFamily.Monospace,
-        modifier = Modifier
-            .background(
-                if (active) Color(0xFF003300) else Color(0xFF1A0000),
-                RoundedCornerShape(2.dp)
-            )
-            .padding(horizontal = 4.dp, vertical = 1.dp)
-    )
+private fun ChatNavBar(
+    online: Boolean,
+    subtitle: String,
+    onHistory: () -> Unit,
+    onNewChat: () -> Unit,
+    onClear: () -> Unit,
+    onSchedule: () -> Unit,
+    onFiles: () -> Unit,
+    onProcesses: () -> Unit,
+    onDashboard: () -> Unit,
+    onSettings: () -> Unit
+) {
+    val c = Apple.colors
+    var menu by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth().background(c.bg).statusBarsPadding()) {
+        Box(Modifier.fillMaxWidth().height(52.dp)) {
+            IconButton(onClick = onHistory, modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp)) {
+                Icon(Icons.Rounded.History, "History", tint = c.blue, modifier = Modifier.size(26.dp))
+            }
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Featurestic", style = MaterialTheme.typography.titleMedium, color = c.label)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (online) c.green else c.gray))
+                    Spacer(Modifier.width(5.dp))
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)) {
+                IconButton(onClick = { menu = true }) {
+                    Icon(Icons.Rounded.MoreHoriz, "More", tint = c.blue, modifier = Modifier.size(26.dp))
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    AppleMenuItem("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
+                    AppleMenuItem("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
+                    AppleMenuItem("Processes", Icons.Rounded.Memory) { menu = false; onProcesses() }
+                    AppleMenuItem("Dashboard", Icons.Rounded.Dashboard) { menu = false; onDashboard() }
+                    AppleMenuItem("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
+                    AppleMenuItem("Settings", Icons.Rounded.Settings) { menu = false; onSettings() }
+                    HorizontalDivider()
+                    AppleMenuItem("Clear chat", Icons.Rounded.Delete, danger = true) { menu = false; onClear() }
+                }
+            }
+        }
+        HorizontalDivider(color = c.separator, thickness = 0.5.dp)
+    }
 }
 
 @Composable
-fun HackerMessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
+private fun AppleMenuItem(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    val c = Apple.colors
+    DropdownMenuItem(
+        text = { Text(text, color = if (danger) c.red else c.label) },
+        onClick = onClick,
+        leadingIcon = { Icon(icon, null, tint = if (danger) c.red else c.blue) }
+    )
+}
+
+// ── Banners ──────────────────────────────────────────────────
+
+@Composable
+private fun ContextBanner(onClear: () -> Unit) {
+    val c = Apple.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.blue.copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Rounded.InsertDriveFile, null, tint = c.blue, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("File context loaded", color = c.blue, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        Text(
+            "Clear",
+            color = c.blue,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable { onClear() }
+        )
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String) {
+    val c = Apple.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.red.copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Rounded.ErrorOutline, null, tint = c.red, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(message, color = c.red, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+// ── Message bubble (iMessage style) ──────────────────────────
+
+@Composable
+private fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
+    val c = Apple.colors
     val isUser = message.role == "user"
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Top
     ) {
-        // ── Header label ──────────────────────────────────────
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(
-                start = if (isUser) 0.dp else 4.dp,
-                end = if (isUser) 4.dp else 0.dp,
-                bottom = 3.dp
-            )
-        ) {
-            if (!isUser) {
-                // AI avatar dot
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .background(HackerGreen, CircleShape)
-                )
-                Spacer(Modifier.width(5.dp))
-            }
-            Text(
-                text = if (isUser) "YOU" else "FEATURESTIC AI",
-                color = if (isUser) HackerUserAccent else HackerGreen,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 2.sp
-            )
-            if (isUser) {
-                Spacer(Modifier.width(5.dp))
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .background(HackerUserAccent, CircleShape)
-                )
-            }
+        if (!isUser) {
+            AiAvatar()
+            Spacer(Modifier.width(8.dp))
         }
-
-        // ── Message bubble ───────────────────────────────────
-        Box(
-            modifier = Modifier
-                .widthIn(min = 80.dp, max = 310.dp)
-                .background(
-                    brush = if (isUser) {
-                        androidx.compose.ui.graphics.Brush.linearGradient(
-                            colors = listOf(Color(0xFF001833), Color(0xFF002244))
-                        )
-                    } else {
-                        androidx.compose.ui.graphics.Brush.linearGradient(
-                            colors = listOf(Color(0xFF061206), Color(0xFF0A180A))
-                        )
-                    },
-                    shape = RoundedCornerShape(
-                        topStart = if (isUser) 14.dp else 2.dp,
-                        topEnd = if (isUser) 2.dp else 14.dp,
-                        bottomStart = 14.dp,
-                        bottomEnd = 14.dp
-                    )
-                )
-                .border(
-                    BorderStroke(
-                        width = if (isStreaming) 1.5.dp else 1.dp,
-                        color = if (isUser)
-                            HackerUserAccent.copy(alpha = if (isStreaming) 0.8f else 0.5f)
-                        else
-                            HackerGreen.copy(alpha = if (isStreaming) 0.9f else 0.4f)
-                    ),
-                    shape = RoundedCornerShape(
-                        topStart = if (isUser) 14.dp else 2.dp,
-                        topEnd = if (isUser) 2.dp else 14.dp,
-                        bottomStart = 14.dp,
-                        bottomEnd = 14.dp
-                    )
-                )
-                .padding(horizontal = 12.dp, vertical = 9.dp)
+        Column(
+            Modifier.widthIn(max = 300.dp),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
-            HackerFormattedText(
-                text = message.content + if (isStreaming) "█" else "",
-                isUser = isUser
-            )
+            Box(
+                Modifier
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = 18.dp,
+                            topEnd = 18.dp,
+                            bottomStart = if (isUser) 18.dp else 4.dp,
+                            bottomEnd = if (isUser) 4.dp else 18.dp
+                        )
+                    )
+                    .background(if (isUser) c.userBubble else c.aiBubble)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                FormattedMessage(
+                    text = message.content + if (isStreaming) " ▌" else "",
+                    isUser = isUser
+                )
+            }
         }
     }
 }
 
 @Composable
-fun HackerFormattedText(text: String, isUser: Boolean) {
-    val segments = parseMessageSegments(text)
-    val context = androidx.compose.ui.platform.LocalContext.current
+private fun AiAvatar() {
+    val c = Apple.colors
+    Box(
+        Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(Brush.linearGradient(listOf(c.blue, c.indigo))),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(16.dp))
+    }
+}
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+@Composable
+private fun FormattedMessage(text: String, isUser: Boolean) {
+    val c = Apple.colors
+    val segments = parseMessageSegments(text)
+    val bodyColor = if (isUser) Color.White else c.label
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segments.forEach { segment ->
             when (segment.type) {
-
-                SegmentType.CODE -> {
-                    // ── Premium Code Block ───────────────────
-                    var copied by remember { mutableStateOf(false) }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF020F02), RoundedCornerShape(8.dp))
-                            .border(
-                                BorderStroke(1.dp, HackerGreenDim.copy(alpha = 0.4f)),
-                                RoundedCornerShape(8.dp)
-                            )
-                    ) {
-                        // Header bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF001800), RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Language badge
-                            if (segment.language.isNotEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .background(HackerGreenDim.copy(alpha = 0.15f), RoundedCornerShape(3.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = segment.language.uppercase(),
-                                        color = HackerYellow,
-                                        fontSize = 9.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp
-                                    )
-                                }
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            // Dot indicators
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                listOf(Color(0xFFFF5F56), Color(0xFFFFBD2E), Color(0xFF27C93F))
-                                    .forEach { c ->
-                                        Box(Modifier.size(7.dp).background(c, RoundedCornerShape(50)))
-                                    }
-                            }
-                            Spacer(Modifier.weight(1f))
-                            // Copy button
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        if (copied) HackerGreen.copy(alpha = 0.2f) else HackerBorder,
-                                        RoundedCornerShape(4.dp)
-                                    )
-                                    .clickable {
-                                        val clip = android.content.ClipData.newPlainText("code", segment.content)
-                                        (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                                            .setPrimaryClip(clip)
-                                        copied = true
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = if (copied) "✓ Copied" else "⧉ Copy",
-                                    color = if (copied) HackerGreen else HackerGreenDim,
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                        // Code content
-                        androidx.compose.foundation.text.selection.SelectionContainer {
-                            Text(
-                                text = segment.content,
-                                color = HackerGreen,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
-
-                SegmentType.COMMAND -> {
-                    // ── Premium Command Block with Copy + Run ──
-                    var copied by remember { mutableStateOf(false) }
-                    val chatVm: ChatViewModel = viewModel()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF0A0900), RoundedCornerShape(6.dp))
-                            .border(BorderStroke(1.dp, HackerYellow.copy(alpha = 0.3f)), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("$", color = HackerYellow, fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = segment.content,
-                            color = HackerGreen,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        // Copy button
-                        Box(
-                            modifier = Modifier
-                                .background(HackerBorder, RoundedCornerShape(3.dp))
-                                .clickable {
-                                    val clip = android.content.ClipData.newPlainText("cmd", segment.content)
-                                    (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                                        .setPrimaryClip(clip)
-                                    copied = true
-                                }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                text = if (copied) "✓" else "⧉",
-                                color = if (copied) HackerGreen else HackerGreenDim,
-                                fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                            )
-                        }
-                        Spacer(Modifier.width(4.dp))
-                        // Run button — seedha execute, AI bypass
-                        var running by remember { mutableStateOf(false) }
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    if (running) HackerYellow.copy(alpha = 0.15f)
-                                    else HackerGreen.copy(alpha = 0.15f),
-                                    RoundedCornerShape(3.dp)
-                                )
-                                .border(
-                                    BorderStroke(1.dp,
-                                        if (running) HackerYellow.copy(alpha = 0.5f)
-                                        else HackerGreen.copy(alpha = 0.4f)
-                                    ),
-                                    RoundedCornerShape(3.dp)
-                                )
-                                .clickable(enabled = !running && !chatVm.uiState.value.isGenerating) {
-                                    running = true
-                                    chatVm.runCommandDirect(segment.content)
-                                }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                text = if (running) "⏳" else "▶ Run",
-                                color = if (running) HackerYellow else HackerGreen,
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                SegmentType.STATUS -> {
-                    val isOk = segment.content.contains("✅") || segment.content.contains("✓")
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (isOk) Color(0xFF002800) else Color(0xFF280000),
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = segment.content,
-                            color = if (isOk) HackerGreen else HackerRed,
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                SegmentType.NORMAL -> {
-                    if (segment.content.isNotBlank()) {
-                        HackerTextWithLinks(text = segment.content, isUser = isUser)
-                    }
-                }
+                SegmentType.CODE -> CodeBlock(segment)
+                SegmentType.COMMAND -> CommandBlock(segment, isUser)
+                SegmentType.STATUS -> StatusRow(segment.content, isUser)
+                SegmentType.NORMAL -> if (segment.content.isNotBlank()) LinkText(segment.content, bodyColor)
             }
         }
     }
 }
 
-// ── Clickable links wala text ────────────────────────────────
-// URLs automatically detect hoti hain aur tap se browser mein khulti hain
 @Composable
-fun HackerTextWithLinks(text: String, isUser: Boolean) {
-    val uriHandler = LocalUriHandler.current
-    val urlRegex = remember {
-        Regex("""(https?://[^\s\)\"<>]+)""")
-    }
-
-    val annotated = buildAnnotatedString {
-        var lastIndex = 0
-        val baseColor = if (isUser) HackerUserAccent else HackerGreenDim
-
-        // Pehle normal inline markdown parse karo, URLs ke liye alag handle karo
-        val fullText = text
-        urlRegex.findAll(fullText).forEach { match ->
-            val before = fullText.substring(lastIndex, match.range.first)
-            // Before part — normal markdown render
-            append(renderInlineMarkdownRaw(before, baseColor))
-
-            // URL part — cyan + underline + annotation
-            pushStringAnnotation(tag = "URL", annotation = match.value)
-            withStyle(SpanStyle(
-                color = HackerCyan,
-                textDecoration = TextDecoration.Underline,
-                fontWeight = FontWeight.Bold
-            )) {
-                append(match.value)
-            }
-            pop()
-            lastIndex = match.range.last + 1
-        }
-        // Remaining text
-        if (lastIndex < fullText.length) {
-            append(renderInlineMarkdownRaw(fullText.substring(lastIndex), baseColor))
-        }
-    }
-
-    androidx.compose.foundation.text.ClickableText(
-        text = annotated,
-        style = androidx.compose.ui.text.TextStyle(
-            fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp,
-            lineHeight = 19.sp
-        ),
-        onClick = { offset ->
-            annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                .firstOrNull()?.let { annotation ->
-                    try { uriHandler.openUri(annotation.item) } catch (e: Exception) { }
+private fun CodeBlock(segment: MessageSegment) {
+    val c = Apple.colors
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSystemInDarkTheme()) Color(0xFF141416) else Color(0xFFF7F7F9))
+            .border(0.5.dp, c.separator, RoundedCornerShape(12.dp))
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                segment.language.ifEmpty { "code" },
+                style = MaterialTheme.typography.labelSmall,
+                color = c.secondaryLabel
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (copied) "Copied" else "Copy",
+                style = MaterialTheme.typography.labelSmall,
+                color = c.blue,
+                modifier = Modifier.clickable {
+                    copyToClipboard(context, segment.content)
+                    copied = true
                 }
+            )
         }
+        HorizontalDivider(color = c.separator, thickness = 0.5.dp)
+        SelectionContainer {
+            Text(
+                segment.content,
+                style = com.txdost.ui.theme.MonospaceStyle,
+                color = if (isSystemInDarkTheme()) Color(0xFFE5E5EA) else Color(0xFF1C1C1E),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommandBlock(segment: MessageSegment, isUser: Boolean) {
+    val c = Apple.colors
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    var running by remember { mutableStateOf(false) }
+    val chatVm: ChatViewModel = viewModel()
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isUser) Color.White.copy(alpha = 0.14f) else c.tertiaryFill)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            segment.content,
+            style = com.txdost.ui.theme.MonospaceStyle,
+            color = if (isUser) Color.White else c.label,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(8.dp))
+        Icon(
+            Icons.Rounded.ContentCopy,
+            "Copy",
+            tint = if (isUser) Color.White.copy(alpha = 0.8f) else c.blue,
+            modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, segment.content); copied = true }
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(c.blue.copy(alpha = 0.15f))
+                .clickable(enabled = !running && !chatVm.uiState.value.isGenerating) {
+                    running = true
+                    chatVm.runCommandDirect(segment.content)
+                }
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.PlayArrow, null, tint = c.blue, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(3.dp))
+                Text(if (running) "Running" else "Run", color = c.blue, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusRow(content: String, isUser: Boolean) {
+    val c = Apple.colors
+    val ok = content.contains("✅") || content.contains("✓")
+    if (isUser) {
+        Text(content, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+    } else {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background((if (ok) c.green else c.red).copy(alpha = 0.12f))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (ok) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
+                null,
+                tint = if (ok) c.green else c.red,
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(content, color = if (ok) c.green else c.red, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun LinkText(text: String, baseColor: Color) {
+    val c = Apple.colors
+    val urlRegex = remember { Regex("""(https?://[^\s\)\"<>]+)""") }
+    val annotated = remember(text, baseColor) {
+        buildAnnotatedString {
+            var lastIndex = 0
+            urlRegex.findAll(text).forEach { match ->
+                append(renderInlineMarkdownRaw(text.substring(lastIndex, match.range.first), baseColor))
+                withLink(
+                    LinkAnnotation.Url(
+                        match.value,
+                        TextLinkStyles(SpanStyle(color = c.blue, textDecoration = TextDecoration.Underline))
+                    )
+                ) { append(match.value) }
+                lastIndex = match.range.last + 1
+            }
+            append(renderInlineMarkdownRaw(text.substring(lastIndex), baseColor))
+        }
+    }
+    Text(annotated, style = MaterialTheme.typography.bodyLarge.copy(color = baseColor))
+}
+
+// ── Typing indicator ─────────────────────────────────────────
+
+@Composable
+private fun TypingBubble() {
+    val c = Apple.colors
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        AiAvatar()
+        Spacer(Modifier.width(8.dp))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
+                .background(c.aiBubble)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val phase by produceState(0) {
+                while (true) { kotlinx.coroutines.delay(350); value = (value + 1) % 3 }
+            }
+            repeat(3) { i ->
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(c.secondaryLabel.copy(alpha = if (i == phase) 1f else 0.35f))
+                )
+            }
+        }
+    }
+}
+
+// ── Empty state ──────────────────────────────────────────────
+
+@Composable
+private fun EmptyChatState(termuxConnected: Boolean) {
+    val c = Apple.colors
+    Column(
+        Modifier.fillMaxWidth().padding(top = 72.dp, start = 28.dp, end = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Brush.linearGradient(listOf(c.blue, c.indigo))),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("Featurestic AI", style = MaterialTheme.typography.titleLarge, color = c.label)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (termuxConnected) "Termux connected — terminal commands, files aur packages sab ready hain."
+            else "Termux se connect karo taaki main aapke device pe commands chala sakoon.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.secondaryLabel,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Spacer(Modifier.height(22.dp))
+        listOf(
+            "Downloads folder list karo",
+            "Ek python script likh ke chalao",
+            "Git install karo"
+        ).forEach { s ->
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(c.secondaryBg)
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Text("“$s”", style = MaterialTheme.typography.bodyMedium, color = c.label)
+            }
+        }
+    }
+}
+
+// ── Input bar ────────────────────────────────────────────────
+
+@Composable
+private fun ChatInputBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    isGenerating: Boolean,
+    enabled: Boolean
+) {
+    val c = Apple.colors
+    Surface(color = c.bg, shadowElevation = 8.dp) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text(if (enabled) "Message" else "Offline", color = c.tertiaryLabel, style = MaterialTheme.typography.bodyLarge)
+                },
+                maxLines = 5,
+                enabled = enabled && !isGenerating,
+                shape = RoundedCornerShape(22.dp),
+                textStyle = MaterialTheme.typography.bodyLarge,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = c.secondaryBg,
+                    unfocusedContainerColor = c.secondaryBg,
+                    disabledContainerColor = c.secondaryBg,
+                    focusedBorderColor = c.separator,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedTextColor = c.label,
+                    unfocusedTextColor = c.label,
+                    cursorColor = c.blue
+                )
+            )
+            Spacer(Modifier.width(8.dp))
+            val canSend = value.isNotBlank() && enabled && !isGenerating
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isGenerating) c.red
+                        else if (canSend) c.blue
+                        else c.fill
+                    )
+                    .clickable(enabled = isGenerating || canSend) {
+                        if (isGenerating) onStop() else onSend()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isGenerating) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
+                    contentDescription = if (isGenerating) "Stop" else "Send",
+                    tint = if (isGenerating || canSend) Color.White else c.tertiaryLabel,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+// ── History drawer ───────────────────────────────────────────
+
+@Composable
+fun HistoryDrawer(
+    conversations: List<Conversation>,
+    activeConvId: String,
+    historyManager: com.txdost.data.ChatHistoryManager,
+    onNewChat: () -> Unit,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onClose: () -> Unit
+) {
+    val c = Apple.colors
+    var deleteTargetId by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+            Box(Modifier.fillMaxWidth().height(52.dp)) {
+                Text(
+                    "Chats",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = c.label,
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp)
+                )
+                IconButton(onClick = onClose, modifier = Modifier.align(Alignment.CenterEnd)) {
+                    Icon(Icons.Rounded.Close, "Close", tint = c.blue)
+                }
+            }
+        }
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(c.blue)
+                .clickable { onNewChat() }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("New chat", color = Color.White, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+
+        if (conversations.isEmpty()) {
+            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                Text("No chats yet", color = c.secondaryLabel, style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                items(conversations, key = { it.id }) { conv ->
+                    val isActive = conv.id == activeConvId
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isActive) c.blue.copy(alpha = 0.12f) else Color.Transparent)
+                            .clickable { onSelect(conv.id) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                conv.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (isActive) c.blue else c.label,
+                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                historyManager.formatDate(conv.updatedAt),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = c.secondaryLabel
+                            )
+                        }
+                        IconButton(onClick = { deleteTargetId = conv.id }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Delete, "Delete", tint = c.tertiaryLabel, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        Text(
+            "${conversations.size} saved",
+            style = MaterialTheme.typography.labelSmall,
+            color = c.tertiaryLabel,
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
+
+    if (deleteTargetId != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTargetId = null },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = c.secondaryBg,
+            title = { Text("Delete chat?", style = MaterialTheme.typography.titleMedium, color = c.label) },
+            text = { Text("Ye conversation permanently delete ho jayegi.", color = c.secondaryLabel) },
+            confirmButton = {
+                TextButton(onClick = { deleteTargetId?.let { onDelete(it) }; deleteTargetId = null }) {
+                    Text("Delete", color = c.red, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTargetId = null }) { Text("Cancel", color = c.blue) }
+            }
+        )
+    }
+}
+
+// ── Schedule dialog ──────────────────────────────────────────
+
+@Composable
+fun ScheduleResearchDialog(
+    onDismiss: () -> Unit,
+    onSchedule: (topic: String, triggerMs: Long, repeat: com.txdost.data.RepeatMode) -> Unit
+) {
+    val c = Apple.colors
+    var topic by remember { mutableStateOf("") }
+    var timeHint by remember { mutableStateOf("") }
+    var delayMinutes by remember { mutableStateOf("") }
+    var repeatMode by remember { mutableStateOf(com.txdost.data.RepeatMode.ONCE) }
+    var error by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(20.dp),
+        containerColor = c.secondaryBg,
+        title = { Text("Schedule a prompt", style = MaterialTheme.typography.titleMedium, color = c.label) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppleTextField(topic, { topic = it }, placeholder = "Kya poochna hai?", label = "Prompt", maxLines = 3, singleLine = false)
+                AppleTextField(delayMinutes, { delayMinutes = it.filter { ch -> ch.isDigit() } }, placeholder = "e.g. 30", label = "Kitne minute baad", keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                Text("Repeat", style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
+                AppleSegmentedControl(
+                    options = listOf("Once", "Daily", "Weekly"),
+                    selectedIndex = when (repeatMode) {
+                        com.txdost.data.RepeatMode.ONCE -> 0
+                        com.txdost.data.RepeatMode.DAILY -> 1
+                        else -> 2
+                    },
+                    onSelect = {
+                        repeatMode = when (it) {
+                            0 -> com.txdost.data.RepeatMode.ONCE
+                            1 -> com.txdost.data.RepeatMode.DAILY
+                            else -> com.txdost.data.RepeatMode.WEEKLY
+                        }
+                    }
+                )
+                if (error.isNotEmpty()) Text(error, color = c.red, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                error = ""
+                val mins = delayMinutes.toLongOrNull()
+                if (topic.isBlank()) { error = "Prompt khali hai"; return@TextButton }
+                if (mins == null || mins <= 0) { error = "Sahi minutes daalo"; return@TextButton }
+                onSchedule(topic, System.currentTimeMillis() + mins * 60_000L, repeatMode)
+            }) { Text("Schedule", color = c.blue, fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.blue) } }
     )
 }
 
-// renderInlineMarkdown ka raw version jo SpanStyle return kare (ClickableText ke liye)
-fun renderInlineMarkdownRaw(
-    text: String,
-    baseColor: Color
-): androidx.compose.ui.text.AnnotatedString {
-    return buildAnnotatedString {
-        var i = 0
-        while (i < text.length) {
-            when {
-                text.startsWith("**", i) -> {
-                    val end = text.indexOf("**", i + 2)
-                    if (end != -1) {
-                        withStyle(SpanStyle(color = HackerYellow, fontWeight = FontWeight.Bold)) {
-                            append(text.substring(i + 2, end))
-                        }
-                        i = end + 2
-                    } else { withStyle(SpanStyle(color = baseColor)) { append(text[i]) }; i++ }
-                }
-                text.startsWith("`", i) && !text.startsWith("```", i) -> {
-                    val end = text.indexOf("`", i + 1)
-                    if (end != -1) {
-                        withStyle(SpanStyle(color = HackerGreen, background = Color(0xFF001400), fontFamily = FontFamily.Monospace)) {
-                            append(text.substring(i + 1, end))
-                        }
-                        i = end + 1
-                    } else { withStyle(SpanStyle(color = baseColor)) { append(text[i]) }; i++ }
-                }
-                else -> { withStyle(SpanStyle(color = baseColor)) { append(text[i]) }; i++ }
-            }
-        }
-    }
+// ── Helpers ──────────────────────────────────────────────────
+
+private fun copyToClipboard(context: android.content.Context, text: String) {
+    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("featurestic", text))
 }
 
 enum class SegmentType { NORMAL, CODE, COMMAND, STATUS }
@@ -715,8 +854,7 @@ fun parseMessageSegments(text: String): List<MessageSegment> {
                 val codeLines = StringBuilder()
                 i++
                 while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
-                    codeLines.appendLine(lines[i])
-                    i++
+                    codeLines.appendLine(lines[i]); i++
                 }
                 segments.add(MessageSegment(SegmentType.CODE, codeLines.toString().trimEnd(), lang))
             }
@@ -725,7 +863,7 @@ fun parseMessageSegments(text: String): List<MessageSegment> {
                 val cmd = line.replace(Regex("""\[TERMUX:(.*?)\]""")) { it.groupValues[1] }.trim()
                 segments.add(MessageSegment(SegmentType.COMMAND, cmd))
             }
-            line.contains("✅") || line.contains("❌") || line.contains(">>") -> {
+            line.contains("✅") || line.contains("❌") -> {
                 flushNormal()
                 segments.add(MessageSegment(SegmentType.STATUS, line.trim()))
             }
@@ -737,507 +875,29 @@ fun parseMessageSegments(text: String): List<MessageSegment> {
     return segments
 }
 
-@Composable
-fun HackerTypingIndicator() {
-    val dots = remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        while (true) {
-            listOf(".", "..", "...", "....").forEach { d ->
-                dots.value = d
-                kotlinx.coroutines.delay(300)
-            }
-        }
-    }
-    Text(
-        text = "< AI@FEATURESTIC :: PROCESSING${dots.value}",
-        color = HackerGreen,
-        fontSize = 11.sp,
-        fontFamily = FontFamily.Monospace,
-        modifier = Modifier
-            .padding(4.dp)
-            .background(HackerAiBg, RoundedCornerShape(4.dp))
-            .padding(8.dp)
-    )
-}
-
-@Composable
-fun EmptyStateHacker() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = """
- ████████╗██╗  ██╗
-    ██╔══╝╚██╗██╔╝
-    ██║    ╚███╔╝ 
-    ██║    ██╔██╗ 
-    ██║   ██╔╝ ██╗
-    ╚═╝   ╚═╝  ╚═╝""".trimIndent(),
-            color = HackerGreen,
-            fontSize = 9.sp,
-            fontFamily = FontFamily.Monospace,
-            lineHeight = 12.sp
-        )
-        Spacer(Modifier.height(8.dp))
-        Text("FEATURESTIC AI TERMINAL v3.0", color = HackerGreenDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
-        Text("TERMUX BRIDGE ACTIVE", color = HackerCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        Spacer(Modifier.height(8.dp))
-        listOf(
-            ">> Run terminal commands",
-            ">> Install packages",
-            ">> Create & execute scripts",
-            ">> Full Termux control"
-        ).forEach {
-            Text(it, color = HackerGreen.copy(alpha = 0.6f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HackerInputBar(
-    value: String,
-    onValueChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit = {},
-    isGenerating: Boolean,
-    enabled: Boolean
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF000A00))
-            .border(BorderStroke(1.dp, HackerBorder))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.Bottom
-    ) {
-        Text(
-            text = ">>",
-            color = HackerGreen,
-            fontSize = 14.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(end = 6.dp, bottom = 10.dp)
-        )
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.weight(1f),
-            placeholder = {
-                Text(
-                    text = if (enabled) "Enter command or query..." else "[ OFFLINE ]",
-                    color = HackerGreen.copy(alpha = 0.3f),
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            },
-            maxLines = 5,
-            enabled = enabled && !isGenerating,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = HackerGreen,
-                unfocusedTextColor = HackerGreenDim,
-                focusedBorderColor = HackerGreen,
-                unfocusedBorderColor = HackerBorder,
-                cursorColor = HackerGreen,
-                focusedContainerColor = Color(0xFF000800),
-                unfocusedContainerColor = Color(0xFF000800),
-                disabledContainerColor = Color(0xFF050805),
-                disabledTextColor = HackerGreen.copy(alpha = 0.3f),
-                disabledBorderColor = HackerBorder.copy(alpha = 0.3f)
-            ),
-            textStyle = androidx.compose.ui.text.TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                color = HackerGreen
-            ),
-            shape = RoundedCornerShape(2.dp),
-            trailingIcon = {
-                if (isGenerating) {
-                    // Red square STOP button
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .padding(4.dp)
-                            .background(Color(0xFF1A0000), RoundedCornerShape(3.dp))
-                            .border(BorderStroke(1.dp, HackerRed), RoundedCornerShape(3.dp))
-                            .clickable { onStop() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .background(HackerRed, RoundedCornerShape(2.dp))
-                        )
-                    }
-                } else if (value.isNotBlank() && enabled) {
-                    IconButton(onClick = onSend) {
-                        Text("[SEND]", color = HackerGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    }
+fun renderInlineMarkdownRaw(text: String, baseColor: Color): androidx.compose.ui.text.AnnotatedString {
+    return buildAnnotatedString {
+        var i = 0
+        while (i < text.length) {
+            when {
+                text.startsWith("**", i) -> {
+                    val end = text.indexOf("**", i + 2)
+                    if (end != -1) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = baseColor)) { append(text.substring(i + 2, end)) }
+                        i = end + 2
+                    } else { withStyle(SpanStyle(color = baseColor)) { append(text[i]) }; i++ }
                 }
-            }
-        )
-    }
-}
-
-// Legacy functions — purane code ke saath compatibility
-@Composable
-fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) = HackerMessageBubble(message, isStreaming)
-
-@Composable
-fun EmptyStateView(ollamaOnline: Boolean) = EmptyStateHacker()
-
-@Composable
-fun StatusChip(text: String, isPositive: Boolean) = StatusPill(text, isPositive)
-
-
-
-
-// ── History Drawer ───────────────────────────────────────────
-@Composable
-fun HistoryDrawer(
-    conversations: List<Conversation>,
-    activeConvId: String,
-    historyManager: com.txdost.data.ChatHistoryManager,
-    onNewChat: () -> Unit,
-    onSelect: (String) -> Unit,
-    onDelete: (String) -> Unit,
-    onClose: () -> Unit
-) {
-    var deleteTargetId by remember { mutableStateOf<String?>(null) }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-
-        // ── Header ───────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF001A00))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "[ HISTORY ]",
-                color = HackerGreen,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.sp,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = HackerRed, modifier = Modifier.size(16.dp))
-            }
-        }
-
-        // ── New Chat Button ───────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp)
-                .background(Color(0xFF001400), RoundedCornerShape(4.dp))
-                .border(BorderStroke(1.dp, HackerGreen.copy(alpha = 0.5f)), RoundedCornerShape(4.dp))
-                .clickable { onNewChat() }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = HackerGreen, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "+ NEW CHAT",
-                color = HackerGreen,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-        }
-
-        // ── Divider ───────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(HackerBorder)
-        )
-
-        // ── Conversation List ─────────────────────────────────
-        if (conversations.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = ">> No history found",
-                    color = HackerGreen.copy(alpha = 0.4f),
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(vertical = 6.dp)
-            ) {
-                items(conversations, key = { it.id }) { conv ->
-                    val isActive = conv.id == activeConvId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                            .background(
-                                if (isActive) Color(0xFF002200) else Color.Transparent,
-                                RoundedCornerShape(4.dp)
-                            )
-                            .border(
-                                BorderStroke(
-                                    if (isActive) 1.dp else 0.dp,
-                                    if (isActive) HackerGreen.copy(alpha = 0.6f) else Color.Transparent
-                                ),
-                                RoundedCornerShape(4.dp)
-                            )
-                            .clickable { onSelect(conv.id) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Active indicator
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(
-                                    if (isActive) HackerGreen else HackerGreen.copy(alpha = 0.2f),
-                                    CircleShape
-                                )
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = conv.title,
-                                color = if (isActive) HackerGreen else HackerGreen.copy(alpha = 0.75f),
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = historyManager.formatDate(conv.updatedAt),
-                                color = HackerGreen.copy(alpha = 0.4f),
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                text.startsWith("`", i) && !text.startsWith("```", i) -> {
+                    val end = text.indexOf("`", i + 1)
+                    if (end != -1) {
+                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = baseColor, background = baseColor.copy(alpha = 0.08f))) {
+                            append(text.substring(i + 1, end))
                         }
-                        // Delete button
-                        IconButton(
-                            onClick = { deleteTargetId = conv.id },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Delete",
-                                tint = HackerRed.copy(alpha = 0.6f),
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
+                        i = end + 1
+                    } else { withStyle(SpanStyle(color = baseColor)) { append(text[i]) }; i++ }
                 }
+                else -> { withStyle(SpanStyle(color = baseColor)) { append(text[i]) }; i++ }
             }
-        }
-
-        // ── Footer ────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF000A00))
-                .padding(8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "${conversations.size} conversation(s) saved",
-                color = HackerGreen.copy(alpha = 0.35f),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
         }
     }
-
-    // ── Delete Confirm Dialog ─────────────────────────────────
-    if (deleteTargetId != null) {
-        AlertDialog(
-            onDismissRequest = { deleteTargetId = null },
-            containerColor   = Color(0xFF0A0A0A),
-            titleContentColor = HackerRed,
-            textContentColor  = HackerGreen,
-            title = { Text("[ DELETE? ]", fontFamily = FontFamily.Monospace) },
-            text  = { Text("Yeh conversation permanently delete ho jayegi.", fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleteTargetId?.let { onDelete(it) }
-                    deleteTargetId = null
-                }) {
-                    Text("[DELETE]", color = HackerRed, fontFamily = FontFamily.Monospace)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTargetId = null }) {
-                    Text("[CANCEL]", color = HackerGreen, fontFamily = FontFamily.Monospace)
-                }
-            }
-        )
-    }
 }
-
-// ── Schedule Research Dialog ──────────────────────────────────
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ScheduleResearchDialog(
-    onDismiss: () -> Unit,
-    onSchedule: (topic: String, triggerMs: Long, repeat: com.txdost.data.RepeatMode) -> Unit
-) {
-    var topic     by remember { mutableStateOf("") }
-    var dateStr   by remember { mutableStateOf("") }   // dd/MM/yyyy
-    var timeStr   by remember { mutableStateOf("") }   // hh:mm
-    var isPm      by remember { mutableStateOf(false) }
-    var repeatMode by remember { mutableStateOf(com.txdost.data.RepeatMode.ONCE) }
-    var error     by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor   = Color(0xFF0A0F0A),
-        titleContentColor = HackerGreen,
-        textContentColor  = HackerGreen,
-        title = {
-            Text(
-                "[ SCHEDULE RESEARCH ]",
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                letterSpacing = 1.sp
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
-                // Topic
-                OutlinedTextField(
-                    value = topic,
-                    onValueChange = { topic = it },
-                    label = { Text("Research Topic", fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
-                    placeholder = { Text("e.g. Bitcoin price analysis", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = HackerGreen.copy(alpha = 0.3f)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 2,
-                    colors = scheduleFieldColors(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = HackerGreen)
-                )
-
-                // Date
-                OutlinedTextField(
-                    value = dateStr,
-                    onValueChange = { dateStr = it },
-                    label = { Text("Date (dd/MM/yyyy)", fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
-                    placeholder = { Text("14/04/2026", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = HackerGreen.copy(alpha = 0.3f)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = scheduleFieldColors(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = HackerGreen)
-                )
-
-                // Time + AM/PM row
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = timeStr,
-                        onValueChange = { timeStr = it },
-                        label = { Text("Time (hh:mm)", fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
-                        placeholder = { Text("08:30", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = HackerGreen.copy(alpha = 0.3f)) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        colors = scheduleFieldColors(),
-                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = HackerGreen)
-                    )
-                    // AM / PM toggle
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(false to "AM", true to "PM").forEach { (pm, label) ->
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        if (isPm == pm) HackerGreen.copy(alpha = 0.2f) else Color.Transparent,
-                                        RoundedCornerShape(3.dp)
-                                    )
-                                    .border(BorderStroke(1.dp, if (isPm == pm) HackerGreen else HackerBorder), RoundedCornerShape(3.dp))
-                                    .clickable { isPm = pm }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(label, color = if (isPm == pm) HackerGreen else HackerGreen.copy(alpha = 0.4f), fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-
-                // Repeat
-                Text("Repeat:", color = HackerGreen.copy(alpha = 0.7f), fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(
-                        com.txdost.data.RepeatMode.ONCE   to "Once",
-                        com.txdost.data.RepeatMode.DAILY  to "Daily",
-                        com.txdost.data.RepeatMode.WEEKLY to "Weekly"
-                    ).forEach { (mode, label) ->
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    if (repeatMode == mode) HackerGreen.copy(alpha = 0.15f) else Color.Transparent,
-                                    RoundedCornerShape(3.dp)
-                                )
-                                .border(BorderStroke(1.dp, if (repeatMode == mode) HackerGreen else HackerBorder), RoundedCornerShape(3.dp))
-                                .clickable { repeatMode = mode }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Text(label, color = if (repeatMode == mode) HackerGreen else HackerGreen.copy(alpha = 0.4f), fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                        }
-                    }
-                }
-
-                if (error.isNotEmpty()) {
-                    Text(error, color = HackerRed, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                error = ""
-                if (topic.isBlank())   { error = "Topic khali hai!"; return@TextButton }
-                if (dateStr.isBlank()) { error = "Date daalo!"; return@TextButton }
-                if (timeStr.isBlank()) { error = "Time daalo!"; return@TextButton }
-                val amPm = if (isPm) "PM" else "AM"
-                val sdf = java.text.SimpleDateFormat("dd/MM/yyyy hh:mm a", java.util.Locale.getDefault())
-                val parsed = try { sdf.parse("$dateStr $timeStr $amPm") } catch (e: Exception) { null }
-                if (parsed == null) { error = "Date/Time format galat hai!"; return@TextButton }
-                if (parsed.time <= System.currentTimeMillis()) { error = "Future time select karo!"; return@TextButton }
-                onSchedule(topic.trim(), parsed.time, repeatMode)
-            }) {
-                Text("[SCHEDULE]", color = HackerGreen, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("[CANCEL]", color = HackerRed, fontFamily = FontFamily.Monospace)
-            }
-        }
-    )
-}
-
-@Composable
-private fun scheduleFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor      = HackerGreen,
-    unfocusedTextColor    = HackerGreenDim,
-    focusedBorderColor    = HackerGreen,
-    unfocusedBorderColor  = HackerBorder,
-    cursorColor           = HackerGreen,
-    focusedContainerColor    = Color(0xFF000800),
-    unfocusedContainerColor  = Color(0xFF000800),
-    focusedLabelColor     = HackerGreen,
-    unfocusedLabelColor   = HackerGreen.copy(alpha = 0.5f)
-)

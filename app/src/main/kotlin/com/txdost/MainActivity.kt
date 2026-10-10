@@ -17,6 +17,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import com.txdost.ui.screens.ChatScreen
 import com.txdost.ui.screens.FileScreen
@@ -25,7 +26,7 @@ import com.txdost.ui.screens.SettingsScreen
 import com.txdost.ui.screens.DashboardScreen
 import com.txdost.ui.screens.FileExplorerScreen
 import com.txdost.ui.screens.TermuxSetupScreen
-import com.txdost.ui.theme.OllamaAppTheme
+import com.txdost.ui.theme.FeaturesticTheme
 import com.txdost.viewmodel.ChatViewModel
 
 class MainActivity : ComponentActivity() {
@@ -51,8 +52,8 @@ class MainActivity : ComponentActivity() {
         val convIdFromNotif = intent?.getStringExtra(TxDostService.EXTRA_CONV_ID)
 
         setContent {
-            OllamaAppTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            FeaturesticTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppNavigation(initialConvId = convIdFromNotif)
                 }
             }
