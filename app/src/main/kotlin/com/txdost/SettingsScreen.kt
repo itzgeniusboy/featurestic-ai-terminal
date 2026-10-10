@@ -1,627 +1,325 @@
 package com.txdost.ui.screens
 
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalContext
 import com.txdost.data.AppPreferences
 import com.txdost.data.LlmClient
 import com.txdost.data.ModelInfo
 import com.txdost.data.ProviderRegistry
+import com.txdost.ui.components.*
+import com.txdost.ui.theme.Apple
+import com.txdost.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 
-private val HBg       = Color(0xFF0A0A0A)
-private val HGreen    = Color(0xFF00FF41)
-private val HGreenDim = Color(0xFF00C832)
-private val HCyan     = Color(0xFF00FFFF)
-private val HYellow   = Color(0xFFFFFF00)
-private val HRed      = Color(0xFFFF0040)
-private val HBorder   = Color(0xFF003300)
-private val HCard     = Color(0xFF0A0F0A)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onNavigateToTermuxSetup: () -> Unit = {}
+    onNavigateToTermuxSetup: () -> Unit = {},
+    chatViewModel: ChatViewModel? = null
 ) {
-    val context = LocalContext.current
-    val prefs = remember { AppPreferences(context) }
-    val llm = remember { LlmClient() }
-    val coroutineScope = rememberCoroutineScope()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val c = Apple.colors
+    val prefs = remember { AppPreferences(app) }
+    val scope = rememberCoroutineScope()
 
-    val savedProviderId by prefs.providerId.collectAsState(initial = ProviderRegistry.default.id)
-    var selectedProviderId by remember { mutableStateOf(savedProviderId) }
-    LaunchedEffect(savedProviderId) { selectedProviderId = savedProviderId }
+    val providerId by remember { prefs.providerId }.collectAsState(initial = ProviderRegistry.default.id)
+    val apiKeyFlow = remember(providerId) { prefs.apiKeyFor(providerId) }
+    val modelFlow = remember(providerId) { prefs.modelFor(providerId) }
+    val apiKeyStored by apiKeyFlow.collectAsState(initial = "")
+    val modelStored by modelFlow.collectAsState(initial = "")
+    val systemPromptStored by remember { prefs.systemPrompt }.collectAsState(initial = "")
+    val proxyStored by remember { prefs.useTermuxProxy }.collectAsState(initial = false)
+    val proxyUrlStored by remember { prefs.termuxProxyUrl }.collectAsState(initial = "http://127.0.0.1:8080/v1")
+    val searchStored by remember { prefs.webSearchProvider }.collectAsState(initial = "DUCKDUCKGO")
+    val tavilyStored by remember { prefs.tavilyApiKey }.collectAsState(initial = "")
+    val firecrawlStored by remember { prefs.firecrawlApiKey }.collectAsState(initial = "")
+    val tempStored by remember { prefs.temperature }.collectAsState(initial = 0.7f)
 
-    val provider = ProviderRegistry.byId(selectedProviderId)
+    var apiKey by remember { mutableStateOf("") }
+    var model by remember { mutableStateOf("") }
+    var systemPrompt by remember { mutableStateOf("") }
+    var proxyEnabled by remember { mutableStateOf(false) }
+    var proxyUrl by remember { mutableStateOf("http://127.0.0.1:8080/v1") }
+    var searchProvider by remember { mutableStateOf("DUCKDUCKGO") }
+    var tavilyKey by remember { mutableStateOf("") }
+    var firecrawlKey by remember { mutableStateOf("") }
+    var temperature by remember { mutableStateOf(0.7f) }
 
-    val savedApiKey by prefs.apiKeyFor(selectedProviderId).collectAsState(initial = "")
-    val savedModel by prefs.modelFor(selectedProviderId).collectAsState(initial = "")
-    val savedPrompt by prefs.systemPrompt.collectAsState(initial = "")
-    val savedSearch by prefs.webSearchProvider.collectAsState(initial = "DUCKDUCKGO")
-    val savedTavily by prefs.tavilyApiKey.collectAsState(initial = "")
-    val savedFirecrawl by prefs.firecrawlApiKey.collectAsState(initial = "")
-    val savedProxyEnabled by prefs.useTermuxProxy.collectAsState(initial = false)
-    val savedProxyUrl by prefs.termuxProxyUrl.collectAsState(initial = "http://127.0.0.1:8080/v1")
+    var apiKeyVisible by remember { mutableStateOf(false) }
+    var tavilyVisible by remember { mutableStateOf(false) }
+    var firecrawlVisible by remember { mutableStateOf(false) }
 
-    var apiKey by remember(selectedProviderId, savedApiKey) { mutableStateOf(savedApiKey) }
-    var model by remember(selectedProviderId, savedModel) { mutableStateOf(savedModel) }
-    var systemPrompt by remember(savedPrompt) { mutableStateOf(savedPrompt) }
-    var searchProvider by remember(savedSearch) { mutableStateOf(savedSearch) }
-    var tavilyKey by remember(savedTavily) { mutableStateOf(savedTavily) }
-    var firecrawlKey by remember(savedFirecrawl) { mutableStateOf(savedFirecrawl) }
-    var proxyEnabled by remember(savedProxyEnabled) { mutableStateOf(savedProxyEnabled) }
-    var proxyUrl by remember(savedProxyUrl) { mutableStateOf(savedProxyUrl) }
-
-    var status by remember { mutableStateOf("") }
     var availableModels by remember { mutableStateOf<List<ModelInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
-    var showModelDropdown by remember { mutableStateOf(false) }
-    var showProviderDropdown by remember { mutableStateOf(false) }
-    var showSearchDropdown by remember { mutableStateOf(false) }
-    var apiKeyVisible by remember { mutableStateOf(false) }
-    var tavilyKeyVisible by remember { mutableStateOf(false) }
-    var firecrawlKeyVisible by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    var providerMenu by remember { mutableStateOf(false) }
+    var modelMenu by remember { mutableStateOf(false) }
+    var searchMenu by remember { mutableStateOf(false) }
 
-    val searchProviders = listOf(
-        "TAVILY"     to "Tavily (Best — Real-time AI search)",
-        "FIRECRAWL"  to "Firecrawl (Full page content)",
-        "DUCKDUCKGO" to "DuckDuckGo (Free, no key)"
-    )
+    LaunchedEffect(providerId, apiKeyStored) { apiKey = apiKeyStored }
+    LaunchedEffect(providerId, modelStored) { model = modelStored }
+    LaunchedEffect(systemPromptStored) { systemPrompt = systemPromptStored }
+    LaunchedEffect(proxyStored) { proxyEnabled = proxyStored }
+    LaunchedEffect(proxyUrlStored) { proxyUrl = proxyUrlStored }
+    LaunchedEffect(searchStored) { searchProvider = searchStored }
+    LaunchedEffect(tavilyStored) { tavilyKey = tavilyStored }
+    LaunchedEffect(firecrawlStored) { firecrawlKey = firecrawlStored }
+    LaunchedEffect(tempStored) { temperature = tempStored }
+
+    val provider = ProviderRegistry.byId(providerId)
 
     fun refreshModels() {
         isLoading = true
-        status = ">> FETCHING FREE MODELS..."
-        coroutineScope.launch {
-            val res = llm.getModels(provider, apiKey.trim())
-            if (res.isSuccess) {
-                availableModels = res.getOrDefault(emptyList())
-                status = if (availableModels.isNotEmpty())
-                    "✅ ${provider.name} — ${availableModels.size} free models"
-                else "✅ ${provider.name} — no free models found"
-                if (model.isBlank() && availableModels.isNotEmpty()) model = availableModels.first().id
-            } else {
-                status = "❌ ${provider.name} — ${res.exceptionOrNull()?.message ?: "connection failed"}"
-            }
+        status = "Loading free models…"
+        scope.launch {
+            val result = com.txdost.data.LlmClient().getModels(provider, apiKey)
             isLoading = false
+            result.onSuccess { list ->
+                availableModels = list
+                if (model.isBlank() && list.isNotEmpty()) model = list.first().id
+                status = if (list.isEmpty()) "No free models found for ${provider.name}"
+                else "${list.size} free model(s) loaded"
+            }.onFailure { status = "Failed: ${it.message ?: "unknown error"}" }
         }
     }
 
-    // Auto-fetch free models whenever provider (or its saved key) changes
-    LaunchedEffect(selectedProviderId, savedApiKey) {
-        availableModels = emptyList()
-        refreshModels()
-    }
-
-    fun saveSettings() {
-        coroutineScope.launch {
-            prefs.saveProviderId(selectedProviderId)
-            prefs.saveApiKeyFor(selectedProviderId, apiKey.trim())
-            prefs.saveModelFor(selectedProviderId, model.trim())
-            prefs.saveSystemPrompt(systemPrompt.trim())
+    fun saveAll() {
+        scope.launch {
+            prefs.saveProviderId(providerId)
+            prefs.saveApiKeyFor(providerId, apiKey.trim())
+            prefs.saveModelFor(providerId, model.trim())
+            prefs.saveSystemPrompt(systemPrompt)
+            prefs.saveUseTermuxProxy(proxyEnabled)
+            prefs.saveTermuxProxyUrl(proxyUrl.trim())
             prefs.saveWebSearchProvider(searchProvider)
             prefs.saveTavilyApiKey(tavilyKey.trim())
             prefs.saveFirecrawlApiKey(firecrawlKey.trim())
-            prefs.saveUseTermuxProxy(proxyEnabled)
-            prefs.saveTermuxProxyUrl(proxyUrl.trim())
-            status = "✅ CONFIG SAVED"
+            prefs.saveTemperature(temperature)
+            status = "Settings saved"
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(HBg)) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // TopBar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF000A00))
-                    .border(BorderStroke(1.dp, HBorder))
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = HGreen, modifier = Modifier.size(20.dp))
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        AppleTopBar(title = "Settings", onBack = onBack)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 40.dp)
+        ) {
+
+            AppleSectionHeader("Termux")
+            AppleGroup {
+                AppleRow(
+                    title = "Setup & connect server",
+                    subtitle = if (chatViewModel?.uiState?.value?.termuxConnected == true) "Connected" else "Not connected",
+                    icon = Icons.Rounded.Terminal,
+                    iconTint = c.green,
+                    showChevron = true,
+                    showDivider = false,
+                    onClick = onNavigateToTermuxSetup
+                )
+            }
+
+            AppleSectionHeader("AI provider")
+            AppleGroup {
+                Box {
+                    AppleRow(
+                        title = "Provider",
+                        icon = Icons.Rounded.Cloud,
+                        trailingText = provider.name,
+                        showChevron = true,
+                        showDivider = false,
+                        onClick = { providerMenu = true }
+                    )
+                    DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
+                        ProviderRegistry.all.forEach { p ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        p.name,
+                                        color = if (p.id == providerId) c.blue else c.label,
+                                        fontWeight = if (p.id == providerId) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    providerMenu = false
+                                    providerId = p.id
+                                    availableModels = emptyList()
+                                }
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "[ CONFIG PANEL ]",
-                        color = HGreen, fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace, letterSpacing = 2.sp
+                }
+            }
+
+            AppleSectionHeader("API key")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    placeholder = "Paste your ${provider.name} key",
+                    visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailing = {
+                        IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                            Icon(
+                                if (apiKeyVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                null,
+                                tint = c.secondaryLabel
+                            )
+                        }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                AppleButton("Load free models", { refreshModels() }, style = AppleButtonStyle.Tinted, loading = isLoading, modifier = Modifier.fillMaxWidth())
+                if (status.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(status, style = MaterialTheme.typography.bodySmall, color = c.secondaryLabel)
+                }
+            }
+
+            AppleSectionHeader("Model")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Box {
+                    AppleRow(
+                        title = "Active model",
+                        subtitle = if (model.isBlank()) "None selected" else (availableModels.firstOrNull { it.id == model }?.name ?: model),
+                        icon = Icons.Rounded.Memory,
+                        showChevron = availableModels.isNotEmpty(),
+                        showDivider = false,
+                        onClick = { if (availableModels.isNotEmpty()) modelMenu = true }
+                    )
+                    DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                        availableModels.forEach { m ->
+                            DropdownMenuItem(
+                                text = { Text(m.name, color = if (m.id == model) c.blue else c.label) },
+                                onClick = { modelMenu = false; model = m.id }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                AppleTextField(value = model, onValueChange = { model = it }, placeholder = "model id", label = "Model id")
+            }
+
+            AppleSectionHeader("Termux proxy")
+            AppleGroup {
+                AppleSwitchRow(
+                    title = "Route via Termux",
+                    subtitle = "Model calls go through your local server",
+                    checked = proxyEnabled,
+                    onCheckedChange = { proxyEnabled = it }
+                )
+                Column(Modifier.padding(16.dp)) {
+                    AppleTextField(value = proxyUrl, onValueChange = { proxyUrl = it }, placeholder = "http://127.0.0.1:8080/v1")
+                }
+            }
+
+            AppleSectionHeader("Web search")
+            AppleGroup {
+                Box {
+                    AppleRow(
+                        title = "Search provider",
+                        icon = Icons.Rounded.Search,
+                        trailingText = searchProvider,
+                        showChevron = true,
+                        showDivider = false,
+                        onClick = { searchMenu = true }
+                    )
+                    DropdownMenu(expanded = searchMenu, onDismissRequest = { searchMenu = false }) {
+                        listOf("TAVILY", "FIRECRAWL", "DUCKDUCKGO").forEach { key ->
+                            DropdownMenuItem(
+                                text = { Text(key, color = if (searchProvider == key) c.blue else c.label) },
+                                onClick = { searchMenu = false; searchProvider = key }
+                            )
+                        }
+                    }
+                }
+            }
+            when (searchProvider) {
+                "TAVILY" -> Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    AppleTextField(
+                        value = tavilyKey, onValueChange = { tavilyKey = it }, placeholder = "tvly-…", label = "Tavily API key",
+                        visualTransformation = if (tavilyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailing = {
+                            IconButton(onClick = { tavilyVisible = !tavilyVisible }) {
+                                Icon(if (tavilyVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null, tint = c.secondaryLabel)
+                            }
+                        }
+                    )
+                }
+                "FIRECRAWL" -> Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    AppleTextField(
+                        value = firecrawlKey, onValueChange = { firecrawlKey = it }, placeholder = "fc-…", label = "Firecrawl API key",
+                        visualTransformation = if (firecrawlVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailing = {
+                            IconButton(onClick = { firecrawlVisible = !firecrawlVisible }) {
+                                Icon(if (firecrawlVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null, tint = c.secondaryLabel)
+                            }
+                        }
                     )
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // ── Termux connection ────────────────────────────
-                HackerSection("[ TERMUX_CONNECTION ]") {
-                    Text(
-                        "3 step me phone ko AI terminal se connect karo. Script app me bundled hai.",
-                        color = HGreenDim.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                    )
-                    Button(
-                        onClick = onNavigateToTermuxSetup,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF001A00)),
-                        shape = RoundedCornerShape(2.dp),
-                        border = BorderStroke(1.dp, HCyan)
-                    ) {
-                        Icon(Icons.Default.Terminal, contentDescription = null, tint = HCyan, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            ">> TERMUX SETUP / CONNECT",
-                            color = HCyan, fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+            AppleSectionHeader("System prompt")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleTextField(
+                    value = systemPrompt,
+                    onValueChange = { systemPrompt = it },
+                    placeholder = "Leave empty for the default Featurestic prompt",
+                    singleLine = false,
+                    maxLines = 8
+                )
+            }
 
-                // ── Provider ─────────────────────────────────────
-                HackerSection("[ PROVIDER ]") {
-                    Box {
-                        OutlinedButton(
-                            onClick = { showProviderDropdown = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(2.dp),
-                            border = BorderStroke(1.dp, HGreen),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFF000800))
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(">> ${provider.name}", color = HGreen, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                                Text("[▼]", color = HGreenDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = showProviderDropdown,
-                            onDismissRequest = { showProviderDropdown = false },
-                            modifier = Modifier.fillMaxWidth(0.9f).background(HCard).border(BorderStroke(1.dp, HBorder))
-                        ) {
-                            ProviderRegistry.all.forEach { p ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            ">> ${p.name}",
-                                            color = if (p.id == selectedProviderId) HCyan else HGreen,
-                                            fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                                            fontWeight = if (p.id == selectedProviderId) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    onClick = { selectedProviderId = p.id; showProviderDropdown = false },
-                                    modifier = Modifier.background(HCard)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // ── API Key ──────────────────────────────────────
-                HackerSection("[ API_KEY ]") {
-                    HackerTextField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it },
-                        label = "${provider.name.uppercase().replace(" ", "_")}_KEY",
-                        placeholder = "api key...",
-                        isPassword = !apiKeyVisible,
-                        trailingIcon = {
-                            IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
-                                Text(
-                                    if (apiKeyVisible) "[HIDE]" else "[SHOW]",
-                                    color = HGreenDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    )
-                    Text(
-                        ">> ${provider.keyHint}",
-                        color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // Refresh free models
-                Button(
-                    onClick = { refreshModels() },
-                    enabled = !isLoading,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF001A00),
-                        disabledContainerColor = Color(0xFF000A00)
-                    ),
-                    shape = RoundedCornerShape(2.dp),
-                    border = BorderStroke(1.dp, if (!isLoading) HGreen else HBorder)
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = HGreen, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(
-                        ">> REFRESH_FREE_MODELS",
-                        color = if (!isLoading) HGreen else HGreenDim,
-                        fontFamily = FontFamily.Monospace, fontSize = 12.sp
-                    )
-                }
-
-                if (status.isNotEmpty()) {
-                    Text(
-                        text = status,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (status.contains("✅")) Color(0xFF001400) else Color(0xFF1A0000),
-                                RoundedCornerShape(2.dp)
-                            )
-                            .border(
-                                BorderStroke(1.dp, if (status.contains("✅")) HGreen else HRed),
-                                RoundedCornerShape(2.dp)
-                            )
-                            .padding(10.dp),
-                        color = if (status.contains("✅")) HGreen else HRed,
-                        fontSize = 11.sp, fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // ── Model ────────────────────────────────────────
-                HackerSection("[ FREE_MODELS ]") {
-                    HackerTextField(
-                        value = model,
-                        onValueChange = { model = it },
-                        label = "MODEL_ID",
-                        placeholder = "model id...",
-                        trailingIcon = {
-                            if (availableModels.isNotEmpty()) {
-                                IconButton(onClick = { showModelDropdown = true }) {
-                                    Text("[▼]", color = HGreenDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                                }
-                            }
-                        }
-                    )
-                    DropdownMenu(
-                        expanded = showModelDropdown,
-                        onDismissRequest = { showModelDropdown = false },
-                        modifier = Modifier.fillMaxWidth(0.9f).background(HCard).border(BorderStroke(1.dp, HBorder))
-                    ) {
-                        availableModels.forEach { m ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(">> ${m.name}", color = HGreen, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                                        if (m.name != m.id) {
-                                            Text(m.id, color = HGreenDim.copy(alpha = 0.6f), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                                        }
-                                    }
-                                },
-                                onClick = { model = m.id; showModelDropdown = false },
-                                modifier = Modifier.background(HCard)
-                            )
-                        }
-                    }
-                    Text(
-                        if (availableModels.isEmpty()) ">> Tap [REFRESH_FREE_MODELS] to load free models"
-                        else ">> ${availableModels.size} free models available",
-                        color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // ── Termux Proxy ─────────────────────────────────
-                HackerSection("[ TERMUX_PROXY ]") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (proxyEnabled) "PROXY: ON ●" else "PROXY: OFF ○",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            color = if (proxyEnabled) HGreen else HGreenDim.copy(alpha = 0.5f),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = proxyEnabled,
-                            onCheckedChange = { proxyEnabled = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = HGreen,
-                                checkedTrackColor = HGreen.copy(alpha = 0.3f),
-                                uncheckedThumbColor = HBorder,
-                                uncheckedTrackColor = HBorder.copy(alpha = 0.3f)
-                            )
-                        )
-                    }
-                    HackerTextField(
-                        value = proxyUrl,
-                        onValueChange = { proxyUrl = it },
-                        label = "PROXY_BASE_URL",
-                        placeholder = "http://127.0.0.1:8080/v1"
-                    )
-                    Text(
-                        ">> Route model calls through your Termux server (X-Provider-Base header set automatically)",
-                        color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // ── WEB SEARCH PROVIDER ──────────────────────────
-                HackerSection("[ WEB_SEARCH_PROVIDER ]") {
-                    Box {
-                        OutlinedButton(
-                            onClick = { showSearchDropdown = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(2.dp),
-                            border = BorderStroke(1.dp, HGreen),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFF000800))
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    ">> $searchProvider",
-                                    color = HGreen, fontFamily = FontFamily.Monospace, fontSize = 12.sp
-                                )
-                                Text("[▼]", color = HGreenDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = showSearchDropdown,
-                            onDismissRequest = { showSearchDropdown = false },
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                                .background(HCard)
-                                .border(BorderStroke(1.dp, HBorder))
-                        ) {
-                            searchProviders.forEach { (key, label) ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(
-                                                ">> $key",
-                                                color = if (searchProvider == key) HCyan else HGreen,
-                                                fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                                                fontWeight = if (searchProvider == key) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                            Text(
-                                                label,
-                                                color = HGreenDim.copy(alpha = 0.6f),
-                                                fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                                            )
-                                        }
-                                    },
-                                    onClick = { searchProvider = key; showSearchDropdown = false },
-                                    modifier = Modifier.background(HCard)
-                                )
-                            }
-                        }
-                    }
-
-                    if (searchProvider == "TAVILY") {
-                        Spacer(Modifier.height(4.dp))
-                        HackerTextField(
-                            value = tavilyKey,
-                            onValueChange = { tavilyKey = it },
-                            label = "TAVILY_API_KEY",
-                            placeholder = "tvly-...",
-                            isPassword = !tavilyKeyVisible,
-                            trailingIcon = {
-                                IconButton(onClick = { tavilyKeyVisible = !tavilyKeyVisible }) {
-                                    Text(
-                                        if (tavilyKeyVisible) "[HIDE]" else "[SHOW]",
-                                        color = HGreenDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        )
-                        Text(
-                            ">> app.tavily.com → API Keys | 1000 free/month",
-                            color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    if (searchProvider == "FIRECRAWL") {
-                        Spacer(Modifier.height(4.dp))
-                        HackerTextField(
-                            value = firecrawlKey,
-                            onValueChange = { firecrawlKey = it },
-                            label = "FIRECRAWL_API_KEY",
-                            placeholder = "fc-...",
-                            isPassword = !firecrawlKeyVisible,
-                            trailingIcon = {
-                                IconButton(onClick = { firecrawlKeyVisible = !firecrawlKeyVisible }) {
-                                    Text(
-                                        if (firecrawlKeyVisible) "[HIDE]" else "[SHOW]",
-                                        color = HGreenDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        )
-                        Text(
-                            ">> firecrawl.dev → Dashboard | 500 free/month",
-                            color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    if (searchProvider == "DUCKDUCKGO") {
-                        Text(
-                            ">> Free, no API key needed. Limited results.",
-                            color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                // ── System Prompt ────────────────────────────────
-                HackerSection("[ SYSTEM_PROMPT ]") {
-                    OutlinedTextField(
-                        value = systemPrompt,
-                        onValueChange = { systemPrompt = it },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
-                        maxLines = 8,
-                        colors = hackerTextFieldColors(),
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = HGreen
-                        ),
-                        placeholder = {
-                            Text(
-                                "Custom system prompt...",
-                                color = HGreen.copy(alpha = 0.3f),
-                                fontFamily = FontFamily.Monospace, fontSize = 12.sp
-                            )
-                        },
-                        shape = RoundedCornerShape(2.dp)
-                    )
-                    Text(
-                        ">> Leave empty for default Featurestic AI prompt",
-                        color = HGreenDim.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // ── Save ─────────────────────────────────────────
-                Button(
-                    onClick = { saveSettings() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF003300)),
-                    shape = RoundedCornerShape(2.dp),
-                    border = BorderStroke(1.dp, HGreen)
-                ) {
-                    Text(
-                        ">> SAVE_CONFIG",
-                        color = HGreen, fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp, fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(Modifier.height(28.dp))
-
-                // ── Temperature ─────────────────────────────────────
-                HackerSection("[ GENERATION_SETTINGS ]") {
-                    val savedTemp by prefs.temperature.collectAsState(initial = 0.7f)
-                    var tempSlider by remember(savedTemp) { mutableStateOf(savedTemp) }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "TEMPERATURE",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            color = HGreen
-                        )
-                        Text(
-                            "${"%.2f".format(tempSlider)}",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = HCyan
-                        )
+            AppleSectionHeader("Generation")
+            AppleGroup {
+                Column(Modifier.padding(16.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Temperature", style = MaterialTheme.typography.bodyLarge, color = c.label)
+                        Text("%.2f".format(temperature), style = MaterialTheme.typography.bodyLarge, color = c.blue, fontWeight = FontWeight.SemiBold)
                     }
                     Slider(
-                        value = tempSlider,
-                        onValueChange = { tempSlider = it },
-                        onValueChangeFinished = {
-                            coroutineScope.launch { prefs.saveTemperature(tempSlider) }
-                        },
+                        value = temperature,
+                        onValueChange = { temperature = it },
+                        onValueChangeFinished = { scope.launch { prefs.saveTemperature(temperature) } },
                         valueRange = 0f..2f,
                         steps = 39,
                         colors = SliderDefaults.colors(
-                            thumbColor = HCyan,
-                            activeTrackColor = HGreen,
-                            inactiveTrackColor = HBorder
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                            thumbColor = c.blue,
+                            activeTrackColor = c.blue,
+                            inactiveTrackColor = c.fill
+                        )
                     )
-                    Text(
-                        "0.0 = deterministic  |  0.7 = balanced  |  2.0 = creative",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp,
-                        color = HGreenDim.copy(alpha = 0.5f)
-                    )
+                    Text("0 = precise • 0.7 = balanced • 2 = creative", style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
                 }
-
-                Spacer(Modifier.height(32.dp))
             }
+
+            Spacer(Modifier.height(20.dp))
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleButton("Save changes", { saveAll() }, modifier = Modifier.fillMaxWidth())
+            }
+            Spacer(Modifier.height(40.dp))
         }
     }
-}
-
-@Composable
-fun HackerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            title,
-            color = HCyan, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, letterSpacing = 1.sp
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(HCard, RoundedCornerShape(2.dp))
-                .border(BorderStroke(1.dp, HBorder), RoundedCornerShape(2.dp))
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            content = content
-        )
-    }
-}
-
-@Composable
-fun hackerTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor       = HGreen,
-    unfocusedTextColor     = HGreenDim,
-    focusedBorderColor     = HGreen,
-    unfocusedBorderColor   = HBorder,
-    cursorColor            = HGreen,
-    focusedContainerColor  = Color(0xFF000800),
-    unfocusedContainerColor = Color(0xFF000800),
-    focusedLabelColor      = HCyan,
-    unfocusedLabelColor    = HCyan.copy(alpha = 0.6f)
-)
-
-@Composable
-fun HackerTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    placeholder: String = "",
-    isPassword: Boolean = false,
-    trailingIcon: @Composable (() -> Unit)? = null
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label, fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-        placeholder = { Text(placeholder, color = HGreen.copy(alpha = 0.3f), fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
-        trailingIcon = trailingIcon,
-        colors = hackerTextFieldColors(),
-        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = HGreen),
-        shape = RoundedCornerShape(2.dp)
-    )
 }
