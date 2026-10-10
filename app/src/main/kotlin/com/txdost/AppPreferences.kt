@@ -23,6 +23,8 @@ class AppPreferences(private val context: Context) {
         val TERMUX_PROXY_URL   = stringPreferencesKey("termux_proxy_url")
         val GLOBAL_SYSTEM_PROMPT = stringPreferencesKey("global_system_prompt")
         val MODEL_CATALOG      = stringPreferencesKey("model_catalog")
+        val AGENT_MODE         = stringPreferencesKey("agent_mode")
+        val SKILLS_JSON        = stringPreferencesKey("skills_json")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
         private fun modelKey(providerId: String) = stringPreferencesKey("model_$providerId")
@@ -66,6 +68,10 @@ class AppPreferences(private val context: Context) {
     // ── Free-model catalog (JSON) for auto-fallback ──────────
     val modelCatalog: Flow<String> = context.dataStore.data.map { it[MODEL_CATALOG] ?: "" }
 
+    // ── Agent mode + skills ──────────────────────────────────
+    val agentMode: Flow<String> = context.dataStore.data.map { it[AGENT_MODE] ?: "build" }
+    val skillsJson: Flow<String> = context.dataStore.data.map { it[SKILLS_JSON] ?: "" }
+
     // ── Generation ───────────────────────────────────────────
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
         it[GLOBAL_SYSTEM_PROMPT]
@@ -89,4 +95,6 @@ class AppPreferences(private val context: Context) {
     suspend fun saveTermuxProxyUrl(url: String) = context.dataStore.edit { it[TERMUX_PROXY_URL] = url }
     suspend fun saveGlobalSystemPrompt(prompt: String) = context.dataStore.edit { it[GLOBAL_SYSTEM_PROMPT] = prompt }
     suspend fun saveModelCatalog(json: String) = context.dataStore.edit { it[MODEL_CATALOG] = json }
+    suspend fun saveAgentMode(mode: String) = context.dataStore.edit { it[AGENT_MODE] = mode }
+    suspend fun saveSkills(json: String) = context.dataStore.edit { it[SKILLS_JSON] = json }
 }

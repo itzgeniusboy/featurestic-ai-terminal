@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToFiles: () -> Unit,
+    onNavigateToSkills: () -> Unit = {},
     chatViewModel: ChatViewModel = viewModel()
 ) {
     val uiState by chatViewModel.uiState.collectAsState()
@@ -97,10 +98,34 @@ fun ChatScreen(
                 onClear = { showClearDialog = true },
                 onSchedule = { showScheduleDialog = true },
                 onFiles = onNavigateToFiles,
+                onSkills = onNavigateToSkills,
                 onSettings = onNavigateToSettings
             )
 
             Column(Modifier.fillMaxWidth().background(c.bg).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AppleSegmentedControl(
+                        options = listOf("Build", "Plan"),
+                        selectedIndex = if (uiState.agentMode == "plan") 1 else 0,
+                        onSelect = { chatViewModel.setAgentMode(if (it == 1) "plan" else "build") },
+                        modifier = Modifier.width(150.dp)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(c.secondaryBg)
+                            .clickable { onNavigateToSkills() }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = c.blue, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Skills", style = MaterialTheme.typography.labelMedium, color = c.label)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 AppleScrollingChips(
                     items = buildList {
                         add(("Cloud" to uiState.ollamaOnline))
@@ -217,6 +242,7 @@ private fun ChatNavBar(
     onClear: () -> Unit,
     onSchedule: () -> Unit,
     onFiles: () -> Unit,
+    onSkills: () -> Unit,
     onSettings: () -> Unit
 ) {
     val c = Apple.colors
@@ -242,6 +268,7 @@ private fun ChatNavBar(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     AppleMenuItem("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
                     AppleMenuItem("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
+                    AppleMenuItem("Skills", Icons.Rounded.AutoAwesome) { menu = false; onSkills() }
                     AppleMenuItem("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
                     AppleMenuItem("Settings", Icons.Rounded.Settings) { menu = false; onSettings() }
                     HorizontalDivider()

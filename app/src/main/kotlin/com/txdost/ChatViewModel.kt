@@ -8,6 +8,10 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.txdost.BuiltInSkills
+import com.txdost.Skill
 import com.txdost.TxDostService
 import com.txdost.data.*
 import kotlinx.coroutines.*
@@ -50,7 +54,10 @@ data class ChatUiState(
     // ── Pending attachment (photo/file to send) ──────────────
     val pendingImageBase64: String? = null,
     val pendingImageMime: String? = null,
-    val pendingFileName: String? = null
+    val pendingFileName: String? = null,
+    // ── Agent mode + skills ──────────────────────────────────
+    val agentMode: String = "build",
+    val skills: List<Skill> = emptyList()
 )
 
 // Debug log entry
@@ -69,6 +76,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = AppPreferences(app)
     private val llm = LlmClient()
+    private val gson = Gson()
     private val termuxBridge = TermuxBridge(app)
     val fileManager = FileManager(app)
     val historyManager = ChatHistoryManager(app)
@@ -127,6 +135,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         checkConnections()
                     }
             }
+        }
+
+        // Agent mode + skills
+        viewModelScope.launch {
+            prefs.agentMode.collect { mode -> _uiState.update { it.copy(agentMode = mode) } }
+        }
+        viewModelScope.launch {
+            prefs.skillsJson.collect { json -> _uiState.update { it.copy(skills = parseSkills(json)) } }
         }
 
         // Termux proxy
@@ -439,9 +455,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            val fileCreated = tryCreateFileFromResponse(aiResponse)
+            // ── PLAN MODE: never execute anything, just show the plan ──
+            if (_uiState.value.agentMode == "plan") {
+                val msgs = _uiState.value.messages + ChatMessage("assistant", cleanTags(aiResponse))
+                _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
+                saveConversation(msgs)
+                return@launch
+            }
 
-            // ── Web Search detect karo — Termux se INDEPENDENT ──────
+            val fileCreated = tryCreateFileFromResponse(aiResponse)
             // Yeh check PEHLE hoga, chahe Termux online ho ya offline
             val webSearchRegex = Regex("""\[WEB_SEARCH:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
             val webSearchMatches = webSearchRegex.findAll(aiResponse).toList()
@@ -1013,7 +1035,19 @@ Now answer the user based on these ACTUAL real-time results.
 
     private fun buildSystemPrompt(termuxConnected: Boolean, deviceInfo: String, activeProcs: String): String {
         val base = currentSystemPrompt.ifBlank {
-            "You are Featurestic AI Terminal, an elite AI assistant and terminal controller running on Android. Be direct and execute tasks immediately."
+            "You are Featurestic AI Terminal, an elite AI assistant and terminal controller running on Android. Be direct and execute tasks immediately. Keep replies short and clean — never send long, unnecessary messages."
+        }
+
+        val enabledSkills = _uiState.value.skills.filter { it.enabled }
+        val skillsBlock = if (enabledSkills.isEmpty()) "" else
+            "\n\n=== ACTIVE SKILLS (follow strictly) ===\n" +
+                enabledSkills.joinToString("\n") { "- ${it.instruction}" }
+
+        val modeBlock = if (_uiState.value.agentMode == "plan") {
+            "\n\n=== MODE: PLAN ===\nYou are in PLAN mode. Do NOT execute anything and do NOT output any action tags " +
+                "([TERMUX:], [INSTALL:], <<<WRITE:...>>>, [BG:], [STOP:]). Reply with only a short, clean plan."
+        } else {
+            "\n\n=== MODE: BUILD ===\nYou may execute actions with action tags when needed. Keep the reply short and clean."
         }
 
         // ── Web Search — ALWAYS available ──────────────────────────
@@ -1048,7 +1082,7 @@ HARD RULES:
 """
 
         if (!termuxConnected) {
-            return base + webSearchSection + fileSection + """
+            return base + skillsBlock + modeBlock + webSearchSection + fileSection + """
 
 ⚠ STATUS: Termux OFFLINE
 → Web Search and File creation are available.
@@ -1060,7 +1094,7 @@ HARD RULES:
         val procsSection  = if (activeProcs.isNotBlank() && activeProcs != "None")
             "\n── Active Processes ──\n$activeProcs\n" else ""
 
-        return base + webSearchSection + fileSection + deviceSection + procsSection + """
+        return base + skillsBlock + modeBlock + webSearchSection + fileSection + deviceSection + procsSection + """
 
 ╔══════════════════════════════════════════╗
 ║     TERMUX DIRECT CONTROL — ONLINE       ║
@@ -1534,6 +1568,57 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
     fun attachTextFile(name: String, content: String) {
         val snippet = "### File: $name\n```\n${content.take(20000)}\n```"
         _uiState.update { it.copy(selectedFileContext = (it.selectedFileContext + "\n\n" + snippet).trim()) }
+    }
+
+    // ── Agent mode + skills ──────────────────────────────────
+    private fun parseSkills(json: String): List<Skill> {
+        val stored: List<Skill> = if (json.isBlank()) emptyList() else try {
+            gson.fromJson(json, object : TypeToken<List<Skill>>() {}.type)
+        } catch (_: Exception) { emptyList() }
+        val storedById = stored.associateBy { it.id }
+        val builtIns = BuiltInSkills.all.map { b -> (storedById[b.id] ?: b).copy(builtIn = true) }
+        val customs = stored.filter { s -> !s.builtIn && BuiltInSkills.all.none { it.id == s.id } }
+        return builtIns + customs
+    }
+
+    private fun persistSkills(list: List<Skill>) {
+        viewModelScope.launch { prefs.saveSkills(gson.toJson(list)) }
+    }
+
+    fun setAgentMode(mode: String) = viewModelScope.launch { prefs.saveAgentMode(mode) }
+
+    fun toggleSkill(id: String) {
+        val updated = _uiState.value.skills.map { if (it.id == id) it.copy(enabled = !it.enabled) else it }
+        _uiState.update { it.copy(skills = updated) }
+        persistSkills(updated)
+    }
+
+    fun addSkill(name: String, description: String, instruction: String) {
+        if (name.isBlank() || instruction.isBlank()) return
+        val updated = _uiState.value.skills + Skill(
+            id = "custom_" + UUID.randomUUID().toString().take(8),
+            name = name.trim(),
+            description = description.trim(),
+            instruction = instruction.trim(),
+            builtIn = false,
+            enabled = true
+        )
+        _uiState.update { it.copy(skills = updated) }
+        persistSkills(updated)
+    }
+
+    fun updateSkill(id: String, name: String, description: String, instruction: String) {
+        val updated = _uiState.value.skills.map {
+            if (it.id == id) it.copy(name = name.trim(), description = description.trim(), instruction = instruction.trim()) else it
+        }
+        _uiState.update { it.copy(skills = updated) }
+        persistSkills(updated)
+    }
+
+    fun deleteSkill(id: String) {
+        val updated = _uiState.value.skills.filter { it.id != id || it.builtIn }
+        _uiState.update { it.copy(skills = updated) }
+        persistSkills(updated)
     }
 
     // Tool test cancel (agar zaroorat pade)
