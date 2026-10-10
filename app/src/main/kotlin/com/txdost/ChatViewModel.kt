@@ -125,16 +125,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        // Termux proxy + temperature prefs
+        // Termux proxy
         viewModelScope.launch {
             combine(prefs.useTermuxProxy, prefs.termuxProxyUrl) { en, url -> en to url }
                 .collect { (en, url) ->
                     llm.proxyEnabled = en
                     llm.proxyBaseUrl = url
                 }
-        }
-        viewModelScope.launch {
-            prefs.temperature.collect { llm.temperature = it }
         }
 
         // Auto connection watcher start karo

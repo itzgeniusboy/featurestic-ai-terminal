@@ -33,7 +33,6 @@ class LlmClient {
 
     // Active provider set by the ViewModel as prefs change.
     var provider: ProviderSpec = ProviderRegistry.default
-    var temperature: Float = 0.7f
 
     // Termux proxy toggle (settings)
     var proxyEnabled: Boolean = false
@@ -84,7 +83,6 @@ class LlmClient {
         val payload = JSONObject().apply {
             put("model", model)
             put("stream", true)
-            put("temperature", temperature.toDouble())
             val arr = JSONArray()
             val sys = buildSystem(systemPrompt, fileContext)
             if (sys.isNotBlank()) {

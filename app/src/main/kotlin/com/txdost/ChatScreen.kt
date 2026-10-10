@@ -13,6 +13,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.txdost.R
 import com.txdost.data.ChatMessage
 import com.txdost.data.Conversation
 import com.txdost.ui.components.*
@@ -36,7 +38,6 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToFiles: () -> Unit,
-    onNavigateToProcesses: () -> Unit = {},
     onNavigateToDashboard: () -> Unit = {},
     chatViewModel: ChatViewModel = viewModel()
 ) {
@@ -70,7 +71,6 @@ fun ChatScreen(
                 onClear = { showClearDialog = true },
                 onSchedule = { showScheduleDialog = true },
                 onFiles = onNavigateToFiles,
-                onProcesses = onNavigateToProcesses,
                 onDashboard = onNavigateToDashboard,
                 onSettings = onNavigateToSettings
             )
@@ -188,7 +188,6 @@ private fun ChatNavBar(
     onClear: () -> Unit,
     onSchedule: () -> Unit,
     onFiles: () -> Unit,
-    onProcesses: () -> Unit,
     onDashboard: () -> Unit,
     onSettings: () -> Unit
 ) {
@@ -215,7 +214,6 @@ private fun ChatNavBar(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     AppleMenuItem("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
                     AppleMenuItem("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
-                    AppleMenuItem("Processes", Icons.Rounded.Memory) { menu = false; onProcesses() }
                     AppleMenuItem("Dashboard", Icons.Rounded.Dashboard) { menu = false; onDashboard() }
                     AppleMenuItem("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
                     AppleMenuItem("Settings", Icons.Rounded.Settings) { menu = false; onSettings() }
@@ -544,15 +542,11 @@ private fun EmptyChatState(termuxConnected: Boolean) {
         Modifier.fillMaxWidth().padding(top = 72.dp, start = 28.dp, end = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            Modifier
-                .size(72.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Brush.linearGradient(listOf(c.blue, c.indigo))),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(36.dp))
-        }
+        Image(
+            painter = painterResource(R.drawable.ic_launcher),
+            contentDescription = "Featurestic AI",
+            modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp))
+        )
         Spacer(Modifier.height(18.dp))
         Text("Featurestic AI", style = MaterialTheme.typography.titleLarge, color = c.label)
         Spacer(Modifier.height(6.dp))

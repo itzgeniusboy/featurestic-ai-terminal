@@ -21,8 +21,6 @@ class AppPreferences(private val context: Context) {
         // ── Termux proxy ─────────────────────────────────────
         val USE_TERMUX_PROXY   = booleanPreferencesKey("use_termux_proxy")
         val TERMUX_PROXY_URL   = stringPreferencesKey("termux_proxy_url")
-        // ── Generation Settings ──────────────────────────────
-        val TEMPERATURE        = floatPreferencesKey("temperature")
         val GLOBAL_SYSTEM_PROMPT = stringPreferencesKey("global_system_prompt")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
@@ -65,7 +63,6 @@ class AppPreferences(private val context: Context) {
     }
 
     // ── Generation ───────────────────────────────────────────
-    val temperature: Flow<Float> = context.dataStore.data.map { it[TEMPERATURE] ?: 0.7f }
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
         it[GLOBAL_SYSTEM_PROMPT]
             ?: "You are Featurestic AI, an AI assistant that helps users with terminal tasks, " +
@@ -86,6 +83,5 @@ class AppPreferences(private val context: Context) {
     suspend fun saveFirecrawlApiKey(key: String) = context.dataStore.edit { it[FIRECRAWL_API_KEY] = key }
     suspend fun saveUseTermuxProxy(enabled: Boolean) = context.dataStore.edit { it[USE_TERMUX_PROXY] = enabled }
     suspend fun saveTermuxProxyUrl(url: String) = context.dataStore.edit { it[TERMUX_PROXY_URL] = url }
-    suspend fun saveTemperature(value: Float) = context.dataStore.edit { it[TEMPERATURE] = value }
     suspend fun saveGlobalSystemPrompt(prompt: String) = context.dataStore.edit { it[GLOBAL_SYSTEM_PROMPT] = prompt }
 }

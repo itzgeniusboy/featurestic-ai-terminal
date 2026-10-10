@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import com.txdost.ui.screens.ChatScreen
 import com.txdost.ui.screens.FileScreen
-import com.txdost.ui.screens.ProcessManagerScreen
 import com.txdost.ui.screens.SettingsScreen
 import com.txdost.ui.screens.DashboardScreen
 import com.txdost.ui.screens.FileExplorerScreen
@@ -108,7 +107,6 @@ fun AppNavigation(initialConvId: String? = null) {
             ChatScreen(
                 onNavigateToSettings  = { navController.navigate("settings") },
                 onNavigateToFiles     = { navController.navigate("file_explorer") },
-                onNavigateToProcesses = { navController.navigate("processes") },
                 onNavigateToDashboard = { navController.navigate("dashboard") },
                 chatViewModel         = chatViewModel
             )
@@ -121,9 +119,6 @@ fun AppNavigation(initialConvId: String? = null) {
         }
         composable("files") {
             FileScreen(onBack = { navController.popBackStack() })
-        }
-        composable("processes") {
-            ProcessManagerScreen(onBack = { navController.popBackStack() })
         }
         composable("termux_setup") {
             TermuxSetupScreen(onBack = { navController.popBackStack() })
