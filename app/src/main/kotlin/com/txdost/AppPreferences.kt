@@ -3,6 +3,8 @@ package com.txdost.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
+import kotlinx.coroutines.flow.first
+import org.json.JSONObject
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -103,4 +105,57 @@ class AppPreferences(private val context: Context) {
 
     /** Wipe every stored preference (keys, models, prompt, skills, catalog). */
     suspend fun clearAll() = context.dataStore.edit { it.clear() }
+
+    // ── Backup / restore (settings + skills) ─────────────────
+    suspend fun exportJson(): String {
+        val p = context.dataStore.data.first()
+        val root = JSONObject()
+        root.put("app", "Featurestic AI Terminal")
+        root.put("version", 1)
+        root.put("providerId", p[PROVIDER_ID] ?: ProviderRegistry.default.id)
+        root.put("systemPrompt", p[SYSTEM_PROMPT] ?: "")
+        root.put("globalSystemPrompt", p[GLOBAL_SYSTEM_PROMPT] ?: "")
+        root.put("webSearchProvider", p[WEB_SEARCH_PROVIDER] ?: "DUCKDUCKGO")
+        root.put("tavilyApiKey", p[TAVILY_API_KEY] ?: "")
+        root.put("firecrawlApiKey", p[FIRECRAWL_API_KEY] ?: "")
+        root.put("agentMode", p[AGENT_MODE] ?: "build")
+        root.put("themeMode", p[THEME_MODE] ?: "system")
+        root.put("skillsJson", p[SKILLS_JSON] ?: "")
+        root.put("modelCatalog", p[MODEL_CATALOG] ?: "")
+        val providers = JSONObject()
+        ProviderRegistry.all.forEach { spec ->
+            providers.put(spec.id, JSONObject().apply {
+                put("apiKey", p[apiKeyKey(spec.id)] ?: "")
+                put("model", p[modelKey(spec.id)] ?: "")
+            })
+        }
+        root.put("providers", providers)
+        return root.toString(2)
+    }
+
+    suspend fun importJson(json: String) {
+        val root = JSONObject(json)
+        context.dataStore.edit { e ->
+            root.optString("providerId").takeIf { it.isNotBlank() }?.let { e[PROVIDER_ID] = it }
+            e[SYSTEM_PROMPT] = root.optString("systemPrompt", "")
+            e[GLOBAL_SYSTEM_PROMPT] = root.optString("globalSystemPrompt", "")
+            e[WEB_SEARCH_PROVIDER] = root.optString("webSearchProvider", "DUCKDUCKGO")
+            e[TAVILY_API_KEY] = root.optString("tavilyApiKey", "")
+            e[FIRECRAWL_API_KEY] = root.optString("firecrawlApiKey", "")
+            e[AGENT_MODE] = root.optString("agentMode", "build")
+            e[THEME_MODE] = root.optString("themeMode", "system")
+            e[SKILLS_JSON] = root.optString("skillsJson", "")
+            e[MODEL_CATALOG] = root.optString("modelCatalog", "")
+            val prov = root.optJSONObject("providers")
+            if (prov != null) {
+                for (spec in ProviderRegistry.all) {
+                    val o = prov.optJSONObject(spec.id) ?: continue
+                    val k = o.optString("apiKey", "")
+                    if (k.isNotEmpty()) e[apiKeyKey(spec.id)] = k
+                    val m = o.optString("model", "")
+                    if (m.isNotEmpty()) e[modelKey(spec.id)] = m
+                }
+            }
+        }
+    }
 }

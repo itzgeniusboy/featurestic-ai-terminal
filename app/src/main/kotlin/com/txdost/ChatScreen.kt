@@ -716,6 +716,17 @@ private fun ChatInputBar(
     onRemoveAttachment: () -> Unit = {}
 ) {
     val c = Apple.colors
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!spoken.isNullOrBlank())
+                onValueChange(if (value.isBlank()) spoken else "$value $spoken")
+        }
+    }
     Surface(color = c.bg, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp)) {
         if (attachmentName != null) {
@@ -757,6 +768,23 @@ private fun ChatInputBar(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.Rounded.AttachFile, "Attach", tint = if (enabled) c.blue else c.tertiaryLabel, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(c.secondaryBg)
+                    .clickable(enabled = enabled && !isGenerating) {
+                        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak…")
+                        }
+                        try { voiceLauncher.launch(intent) } catch (e: Exception) { }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Mic, "Voice", tint = if (enabled) c.blue else c.tertiaryLabel, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(8.dp))
             OutlinedTextField(

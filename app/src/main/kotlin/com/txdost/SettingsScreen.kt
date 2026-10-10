@@ -1,5 +1,7 @@
 package com.txdost.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -180,6 +182,31 @@ fun SettingsScreen(
         }
     }
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(prefs.exportJson().toByteArray()) }
+                status = "Exported"
+            } catch (e: Exception) { status = "Export failed: ${e.message}" }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                prefs.importJson(text)
+                keys.clear()
+                ProviderRegistry.all.forEach { spec -> keys[spec.id] = prefs.apiKeyFor(spec.id).first() }
+                status = "Imported"
+            } catch (e: Exception) { status = "Import failed: ${e.message}" }
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(c.bg)) {
         AppleTopBar(title = "Settings", onBack = onBack)
         Column(
@@ -323,6 +350,31 @@ fun SettingsScreen(
                         scope.launch { prefs.saveThemeMode(mode) }
                     },
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            AppleSectionHeader("Backup")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Row(Modifier.fillMaxWidth()) {
+                    AppleButton(
+                        "Export",
+                        { exportLauncher.launch("featurestic-backup.json") },
+                        Modifier.weight(1f),
+                        style = AppleButtonStyle.Tinted
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    AppleButton(
+                        "Import",
+                        { importLauncher.launch(arrayOf("application/json")) },
+                        Modifier.weight(1f),
+                        style = AppleButtonStyle.Tinted
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Backup ya restore: API keys, models, prompt aur skills ek JSON file me.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = c.secondaryLabel
                 )
             }
 
