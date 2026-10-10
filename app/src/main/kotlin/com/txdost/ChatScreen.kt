@@ -99,6 +99,7 @@ fun ChatScreen(
                 onClear = { showClearDialog = true },
                 onSchedule = { showScheduleDialog = true },
                 onFiles = onNavigateToFiles,
+                onSkills = onNavigateToSkills,
                 onTerminal = onNavigateToTerminal,
                 onSettings = onNavigateToSettings
             )
