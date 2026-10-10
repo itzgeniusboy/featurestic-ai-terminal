@@ -414,3 +414,32 @@ fun AppleScrollingChips(
         items.forEach { (text, active) -> AppleBadge(text, active) }
     }
 }
+
+@Composable
+fun AppleAlertDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    confirmText: String,
+    onConfirm: () -> Unit,
+    dismissText: String? = "Cancel",
+    destructive: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val c = Apple.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(20.dp),
+        containerColor = c.secondaryBg,
+        title = { Text(title, style = MaterialTheme.typography.titleMedium, color = c.label) },
+        text = { content() },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmText, color = if (destructive) c.red else c.blue, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = if (dismissText != null) {
+            { TextButton(onClick = onDismiss) { Text(dismissText, color = c.blue) } }
+        } else null
+    )
+}
+

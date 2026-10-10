@@ -1,6 +1,8 @@
 package com.txdost.ui.screens
 
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -8,175 +10,149 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.NoteAdd
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.txdost.data.FileItem
+import com.txdost.ui.components.*
+import com.txdost.ui.theme.Apple
+import com.txdost.ui.theme.MonospaceStyle
 import com.txdost.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 
-private val FBg      = Color(0xFF0A0A0A)
-private val FGreen   = Color(0xFF00FF41)
-private val FGreenDim= Color(0xFF00C832)
-private val FCyan    = Color(0xFF00FFFF)
-private val FYellow  = Color(0xFFFFFF00)
-private val FRed     = Color(0xFFFF0040)
-private val FBorder  = Color(0xFF003300)
-private val FCard    = Color(0xFF0A0F0A)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileScreen(
     onBack: () -> Unit,
     chatViewModel: ChatViewModel = viewModel()
 ) {
+    val c = Apple.colors
     val fileManager = chatViewModel.fileManager
-    val coroutineScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
-    var currentPath     by remember { mutableStateOf("") }
-    var files           by remember { mutableStateOf(fileManager.listFiles(currentPath)) }
-    var statusMessage   by remember { mutableStateOf("") }
-    var statusOk        by remember { mutableStateOf(true) }
+    var currentPath by remember { mutableStateOf("") }
+    var files by remember { mutableStateOf(fileManager.listFiles(currentPath)) }
+    var statusMessage by remember { mutableStateOf("") }
+    var statusOk by remember { mutableStateOf(true) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
-    var editingFile     by remember { mutableStateOf<FileItem?>(null) }
-    var viewingFile     by remember { mutableStateOf<FileItem?>(null) }
-    var deleteFile      by remember { mutableStateOf<FileItem?>(null) }
-    var executeResult   by remember { mutableStateOf("") }
-    var newFileName     by remember { mutableStateOf("") }
-    var newFileContent  by remember { mutableStateOf("") }
-    var editContent     by remember { mutableStateOf("") }
-    var newFolderName   by remember { mutableStateOf("") }
+    var editingFile by remember { mutableStateOf<FileItem?>(null) }
+    var viewingFile by remember { mutableStateOf<FileItem?>(null) }
+    var deleteFile by remember { mutableStateOf<FileItem?>(null) }
+    var executeResult by remember { mutableStateOf("") }
+    var newFileName by remember { mutableStateOf("") }
+    var newFileContent by remember { mutableStateOf("") }
+    var editContent by remember { mutableStateOf("") }
+    var newFolderName by remember { mutableStateOf("") }
 
     fun refresh() { files = fileManager.listFiles(currentPath) }
 
-    Box(modifier = Modifier.fillMaxSize().background(FBg)) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(c.bg)) {
+        AppleTopBar(
+            title = "Workspace",
+            subtitle = "/$currentPath",
+            onBack = {
+                if (currentPath.isEmpty()) onBack()
+                else { currentPath = currentPath.substringBeforeLast("/", ""); refresh() }
+            },
+            actions = {
+                IconButton(onClick = { showFolderDialog = true }) { Icon(Icons.Rounded.CreateNewFolder, "New folder", tint = c.blue) }
+                IconButton(onClick = { showCreateDialog = true }) { Icon(Icons.Rounded.NoteAdd, "New file", tint = c.blue) }
+                IconButton(onClick = { refresh() }) { Icon(Icons.Rounded.Refresh, "Refresh", tint = c.blue) }
+            }
+        )
 
-            // TopBar
-            Box(
-                modifier = Modifier
+        if (statusMessage.isNotEmpty()) {
+            Row(
+                Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF000A00))
-                    .border(BorderStroke(1.dp, FBorder))
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background((if (statusOk) c.green else c.red).copy(alpha = 0.12f))
+                    .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { if (currentPath.isEmpty()) onBack() else { currentPath = currentPath.substringBeforeLast("/",""); refresh() } },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = FGreen, modifier = Modifier.size(20.dp))
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("[ WORKSPACE ]", color = FGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, letterSpacing = 2.sp)
-                        Text(
-                            ">> /${if (currentPath.isEmpty()) "" else currentPath}",
-                            color = FCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace
-                        )
-                    }
-                    IconButton(onClick = { showFolderDialog = true }, modifier = Modifier.size(32.dp)) {
-                        Text("[+D]", color = FYellow, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                    }
-                    IconButton(onClick = { showCreateDialog = true }, modifier = Modifier.size(32.dp)) {
-                        Text("[+F]", color = FGreen, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                    }
-                    IconButton(onClick = { refresh() }, modifier = Modifier.size(32.dp)) {
-                        Text("[↻]", color = FGreenDim, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                    }
+                Text(
+                    statusMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (statusOk) c.green else c.red,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { statusMessage = "" }) { Text("Dismiss", color = c.blue) }
+            }
+        }
+
+        if (files.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("No files yet", style = MaterialTheme.typography.titleMedium, color = c.label)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Create a file to get started.", style = MaterialTheme.typography.bodyMedium, color = c.secondaryLabel)
+                    Spacer(Modifier.height(16.dp))
+                    AppleButton("New file", { showCreateDialog = true }, icon = Icons.Rounded.NoteAdd)
                 }
             }
-
-            // Status
-            if (statusMessage.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(if (statusOk) Color(0xFF001400) else Color(0xFF1A0000))
-                        .border(BorderStroke(1.dp, if (statusOk) FGreen else FRed))
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(statusMessage, color = if (statusOk) FGreen else FRed, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { statusMessage = "" }, contentPadding = PaddingValues(0.dp)) {
-                        Text("[X]", color = FRed, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                    }
-                }
-            }
-
-            if (files.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("[ EMPTY ]", color = FGreenDim, fontSize = 16.sp, fontFamily = FontFamily.Monospace)
-                        Text(">> No files in workspace", color = FGreenDim.copy(alpha = 0.5f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                        OutlinedButton(
-                            onClick = { showCreateDialog = true },
-                            colors = ButtonDefaults.outlinedButtonColors(),
-                            border = BorderStroke(1.dp, FGreen)
-                        ) {
-                            Text("[+] NEW FILE", color = FGreen, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                        }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    items(files) { file ->
-                        HackerFileRow(
-                            file = file,
-                            onOpen = {
-                                if (file.isDirectory) {
-                                    currentPath = if (currentPath.isEmpty()) file.name else "$currentPath/${file.name}"
-                                    refresh()
-                                } else viewingFile = file
-                            },
-                            onEdit = {
-                                if (!file.isDirectory) {
-                                    editContent = fileManager.readFile(file.path).getOrElse { "" }
-                                    editingFile = file
-                                }
-                            },
-                            onDelete = { deleteFile = file },
-                            onExecute = {
-                                coroutineScope.launch {
-                                    statusMessage = ">> Executing ${file.name}..."
-                                    statusOk = true
-                                    val result = fileManager.executeFile(file.path)
-                                    executeResult = "$ ${file.name}\n\n${result.output}\n\nExit: ${result.exitCode}"
-                                    statusMessage = if (result.success) "✅ Executed: ${file.name}" else "❌ Failed: ${file.name}"
-                                    statusOk = result.success
-                                }
-                            },
-                            onAddToAI = {
-                                chatViewModel.setFileContext(fileManager.getFileContextForAI(file.path))
-                                statusMessage = "✅ ${file.name} → AI context loaded"
-                                statusOk = true
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                items(files) { file ->
+                    FileRow(
+                        file = file,
+                        onOpen = {
+                            if (file.isDirectory) {
+                                currentPath = if (currentPath.isEmpty()) file.name else "$currentPath/${file.name}"
+                                refresh()
+                            } else viewingFile = file
+                        },
+                        onEdit = {
+                            if (!file.isDirectory) {
+                                editContent = fileManager.readFile(file.path).getOrElse { "" }
+                                editingFile = file
                             }
-                        )
-                    }
+                        },
+                        onDelete = { deleteFile = file },
+                        onExecute = {
+                            scope.launch {
+                                statusMessage = "Executing ${file.name}…"
+                                statusOk = true
+                                val result = fileManager.executeFile(file.path)
+                                executeResult = "$ ${file.name}\n\n${result.output}\n\nExit code: ${result.exitCode}"
+                                statusMessage = if (result.success) "Executed ${file.name}" else "Failed: ${file.name}"
+                                statusOk = result.success
+                            }
+                        },
+                        onAddToAI = {
+                            chatViewModel.setFileContext(fileManager.getFileContextForAI(file.path))
+                            statusMessage = "${file.name} added to AI context"
+                            statusOk = true
+                        }
+                    )
                 }
             }
         }
     }
 
-    // Create File Dialog
     if (showCreateDialog) {
-        HackerDialog(
-            title = "[ NEW FILE ]",
+        AppleAlertDialog(
+            title = "New file",
             onDismiss = { showCreateDialog = false; newFileName = ""; newFileContent = "" },
-            confirmText = "[CREATE]",
+            confirmText = "Create",
             onConfirm = {
                 if (newFileName.isNotBlank()) {
                     val path = if (currentPath.isEmpty()) newFileName else "$currentPath/$newFileName"
@@ -187,38 +163,18 @@ fun FileScreen(
                 }
             }
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = newFileName,
-                    onValueChange = { newFileName = it },
-                    label = { Text("FILENAME", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                    placeholder = { Text("script.py", color = FGreen.copy(alpha = 0.3f), fontFamily = FontFamily.Monospace) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fileTextFieldColors(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = FGreen),
-                    shape = RoundedCornerShape(2.dp)
-                )
-                OutlinedTextField(
-                    value = newFileContent,
-                    onValueChange = { newFileContent = it },
-                    label = { Text("CONTENT", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                    maxLines = 15,
-                    colors = fileTextFieldColors(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = FGreen),
-                    shape = RoundedCornerShape(2.dp)
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppleTextField(newFileName, { newFileName = it }, placeholder = "filename.sh", label = "Name")
+                AppleTextField(newFileContent, { newFileContent = it }, placeholder = "contents…", label = "Content", singleLine = false, maxLines = 12)
             }
         }
     }
 
-    // New Folder
     if (showFolderDialog) {
-        HackerDialog(
-            title = "[ NEW DIRECTORY ]",
+        AppleAlertDialog(
+            title = "New folder",
             onDismiss = { showFolderDialog = false; newFolderName = "" },
-            confirmText = "[MKDIR]",
+            confirmText = "Create",
             onConfirm = {
                 if (newFolderName.isNotBlank()) {
                     val path = if (currentPath.isEmpty()) newFolderName else "$currentPath/$newFolderName"
@@ -229,54 +185,31 @@ fun FileScreen(
                 }
             }
         ) {
-            OutlinedTextField(
-                value = newFolderName,
-                onValueChange = { newFolderName = it },
-                label = { Text("DIR_NAME", fontFamily = FontFamily.Monospace, fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                colors = fileTextFieldColors(),
-                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = FGreen),
-                shape = RoundedCornerShape(2.dp)
-            )
+            AppleTextField(newFolderName, { newFolderName = it }, placeholder = "folder name", label = "Name")
         }
     }
 
-    // View File
     viewingFile?.let { file ->
-        val content = fileManager.readFile(file.path).getOrElse { "Cannot read file" }
-        HackerDialog(
-            title = "[ ${file.name.uppercase()} ]",
+        val content = fileManager.readFile(file.path).getOrElse { "" }
+        AppleAlertDialog(
+            title = file.name,
             onDismiss = { viewingFile = null },
-            confirmText = "[EDIT]",
-            onConfirm = { editContent = content; editingFile = file; viewingFile = null },
-            dismissText = "[CLOSE]"
+            confirmText = "Close",
+            onConfirm = { viewingFile = null }
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 400.dp)
-                    .background(Color(0xFF000800), RoundedCornerShape(2.dp))
-                    .border(BorderStroke(1.dp, FBorder), RoundedCornerShape(2.dp))
-            ) {
-                Text(
-                    text = content,
-                    modifier = Modifier.verticalScroll(rememberScrollState()).padding(8.dp),
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = FGreen,
-                    lineHeight = 16.sp
-                )
+            Box(Modifier.heightIn(max = 360.dp)) {
+                SelectionContainerCompat {
+                    Text(content.ifEmpty { "(empty file)" }, style = MonospaceStyle, color = c.label)
+                }
             }
         }
     }
 
-    // Edit File
     editingFile?.let { file ->
-        HackerDialog(
-            title = "[ EDIT: ${file.name.uppercase()} ]",
+        AppleAlertDialog(
+            title = "Edit ${file.name}",
             onDismiss = { editingFile = null },
-            confirmText = "[SAVE]",
+            confirmText = "Save",
             onConfirm = {
                 val result = fileManager.writeFile(file.path, editContent)
                 statusMessage = result.getOrElse { it.message ?: "Error" }
@@ -284,71 +217,46 @@ fun FileScreen(
                 refresh(); editingFile = null
             }
         ) {
-            OutlinedTextField(
-                value = editContent,
-                onValueChange = { editContent = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp, max = 400.dp),
-                maxLines = 50,
-                colors = fileTextFieldColors(),
-                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = FGreen),
-                shape = RoundedCornerShape(2.dp)
-            )
+            AppleTextField(editContent, { editContent = it }, placeholder = "", singleLine = false, maxLines = 30)
         }
     }
 
-    // Execute Result
     if (executeResult.isNotEmpty()) {
-        HackerDialog(
-            title = "[ EXECUTION OUTPUT ]",
+        AppleAlertDialog(
+            title = "Output",
             onDismiss = { executeResult = "" },
-            confirmText = "[CLOSE]",
-            onConfirm = { executeResult = "" }
+            confirmText = "Close",
+            onConfirm = { executeResult = "" },
+            dismissText = null
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 350.dp)
-                    .background(Color(0xFF000800), RoundedCornerShape(2.dp))
-                    .border(BorderStroke(1.dp, FBorder), RoundedCornerShape(2.dp))
-            ) {
-                Text(
-                    text = executeResult,
-                    modifier = Modifier.verticalScroll(rememberScrollState()).padding(8.dp),
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = FGreen,
-                    lineHeight = 16.sp
-                )
+            Box(Modifier.heightIn(max = 320.dp)) {
+                SelectionContainerCompat {
+                    Text(executeResult, style = MonospaceStyle, color = c.label)
+                }
             }
         }
     }
 
-    // Delete Confirm
     deleteFile?.let { file ->
-        HackerDialog(
-            title = "[ DELETE? ]",
+        AppleAlertDialog(
+            title = "Delete \"${file.name}\"?",
             onDismiss = { deleteFile = null },
-            confirmText = "[DELETE]",
+            confirmText = "Delete",
+            destructive = true,
             onConfirm = {
                 val result = fileManager.delete(file.path)
                 statusMessage = result.getOrElse { it.message ?: "Error" }
                 statusOk = result.isSuccess
                 refresh(); deleteFile = null
-            },
-            isDestructive = true
+            }
         ) {
-            Text(
-                ">> rm -rf ${file.name}\n>> This cannot be undone.",
-                color = FRed,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp
-            )
+            Text("This cannot be undone.", style = MaterialTheme.typography.bodyMedium, color = c.secondaryLabel)
         }
     }
 }
 
 @Composable
-fun HackerFileRow(
+private fun FileRow(
     file: FileItem,
     onOpen: () -> Unit,
     onEdit: () -> Unit,
@@ -356,115 +264,82 @@ fun HackerFileRow(
     onExecute: () -> Unit,
     onAddToAI: () -> Unit
 ) {
+    val c = Apple.colors
     var expanded by remember { mutableStateOf(false) }
-    val icon = when {
+    val emoji = when {
         file.isDirectory -> "📁"
-        file.name.endsWith(".py")   -> "🐍"
-        file.name.endsWith(".kt")   -> "🟣"
-        file.name.endsWith(".js")   -> "🟡"
-        file.name.endsWith(".sh")   -> "💻"
+        file.name.endsWith(".py") -> "🐍"
+        file.name.endsWith(".kt") -> "🟪"
+        file.name.endsWith(".js") -> "🟨"
+        file.name.endsWith(".sh") -> "💻"
         file.name.endsWith(".html") -> "🌐"
         file.name.endsWith(".json") -> "📋"
-        file.name.endsWith(".md")   -> "📝"
+        file.name.endsWith(".md") -> "📝"
         else -> "📄"
     }
 
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxWidth()
-            .background(
-                if (expanded) Color(0xFF0A1A0A) else Color(0xFF050F05),
-                RoundedCornerShape(2.dp)
-            )
-            .border(BorderStroke(1.dp, if (expanded) FGreen.copy(alpha = 0.4f) else FBorder), RoundedCornerShape(2.dp))
-            .clickable { onOpen() }
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (expanded) c.secondaryBg else Color.Transparent)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().clickable { onOpen() }.padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(icon, fontSize = 18.sp, modifier = Modifier.padding(end = 8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(file.name, color = FGreen, fontSize = 13.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
-                Text(file.displaySize, color = FGreenDim.copy(alpha = 0.5f), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Box(
+                Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(c.fill.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) { Text(emoji) }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(file.name, style = MaterialTheme.typography.bodyLarge, color = c.label, maxLines = 1)
+                Text(file.displaySize, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
             }
-            Text(
-                if (expanded) "[-]" else "[+]",
-                color = FGreenDim,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier
-                    .clickable { expanded = !expanded }
-                    .padding(4.dp)
-            )
+            IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Rounded.MoreHoriz, "Actions", tint = c.secondaryLabel)
+            }
         }
-
         if (expanded) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(start = 10.dp, end = 10.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (!file.isDirectory) {
-                    HackerActionBtn("[EDIT]", FGreen) { onEdit(); expanded = false }
-                    HackerActionBtn("[AI]", FCyan) { onAddToAI(); expanded = false }
-                    if (file.name.endsWith(".sh") || file.name.endsWith(".py"))
-                        HackerActionBtn("[RUN]", FYellow) { onExecute(); expanded = false }
+                    Chip("Edit", c.blue) { onEdit(); expanded = false }
+                    Chip("Add to AI", c.indigo) { onAddToAI(); expanded = false }
+                    if (file.name.endsWith(".sh") || file.name.endsWith(".py")) {
+                        Chip("Run", c.green) { onExecute(); expanded = false }
+                    }
                 }
-                HackerActionBtn("[DEL]", FRed) { onDelete(); expanded = false }
+                Chip("Delete", c.red) { onDelete(); expanded = false }
             }
         }
     }
 }
 
 @Composable
-fun HackerActionBtn(text: String, color: Color, onClick: () -> Unit) {
+private fun Chip(text: String, color: Color, onClick: () -> Unit) {
     Text(
-        text = text,
+        text,
+        style = MaterialTheme.typography.labelMedium,
         color = color,
-        fontSize = 10.sp,
-        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.SemiBold,
         modifier = Modifier
-            .background(color.copy(alpha = 0.1f), RoundedCornerShape(2.dp))
-            .border(BorderStroke(1.dp, color.copy(alpha = 0.3f)), RoundedCornerShape(2.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = 0.14f))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 7.dp)
     )
 }
 
 @Composable
-fun fileTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = FGreen, unfocusedTextColor = FGreenDim,
-    focusedBorderColor = FGreen, unfocusedBorderColor = FBorder,
-    cursorColor = FGreen,
-    focusedContainerColor = Color(0xFF000800), unfocusedContainerColor = Color(0xFF000800),
-    focusedLabelColor = FCyan, unfocusedLabelColor = FCyan.copy(alpha = 0.6f)
-)
-
-@Composable
-fun HackerDialog(
-    title: String,
-    onDismiss: () -> Unit,
-    confirmText: String,
-    onConfirm: () -> Unit,
-    dismissText: String = "[CANCEL]",
-    isDestructive: Boolean = false,
-    content: @Composable () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF0A0A0A),
-        titleContentColor = FCyan,
-        title = { Text(title, fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
-        text = { content() },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(confirmText, color = if (isDestructive) FRed else FGreen, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(dismissText, color = FGreenDim, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-            }
-        }
-    )
+private fun SelectionContainerCompat(content: @Composable () -> Unit) {
+    androidx.compose.foundation.text.selection.SelectionContainer {
+        Box(Modifier.verticalScroll(rememberScrollState())) { content() }
+    }
 }

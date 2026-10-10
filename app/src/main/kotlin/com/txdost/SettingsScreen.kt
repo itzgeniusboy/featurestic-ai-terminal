@@ -164,8 +164,8 @@ fun SettingsScreen(
                                 },
                                 onClick = {
                                     providerMenu = false
-                                    providerId = p.id
                                     availableModels = emptyList()
+                                    scope.launch { prefs.saveProviderId(p.id) }
                                 }
                             )
                         }
