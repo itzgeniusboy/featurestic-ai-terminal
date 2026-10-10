@@ -131,6 +131,9 @@ fun ChatScreen(
                         add(("Cloud" to uiState.ollamaOnline))
                         add(("Termux" to uiState.termuxConnected))
                         add((uiState.providerId.replaceFirstChar { it.uppercase() } to true))
+                        if (uiState.agentMode == "plan") add(("Plan" to true))
+                        val skillCount = uiState.skills.count { it.enabled }
+                        if (skillCount > 0) add(("$skillCount skill${if (skillCount > 1) "s" else ""}" to true))
                         if (uiState.activeProcesses.isNotEmpty()) add(("${uiState.activeProcesses.size} running" to true))
                     },
                     modifier = Modifier.padding(horizontal = 0.dp)
@@ -154,7 +157,14 @@ fun ChatScreen(
                 if (uiState.messages.isEmpty() && uiState.streamingText.isEmpty()) {
                     item { EmptyChatState(termuxConnected = uiState.termuxConnected) }
                 }
-                items(uiState.messages) { msg -> MessageBubble(msg) }
+                val lastAssistantIdx = uiState.messages.indexOfLast { it.role == "assistant" }
+                itemsIndexed(uiState.messages) { idx, msg ->
+                    MessageBubble(
+                        message = msg,
+                        onRegenerate = if (idx == lastAssistantIdx && !uiState.isGenerating)
+                            ({ chatViewModel.regenerate() }) else null
+                    )
+                }
                 if (uiState.streamingText.isNotEmpty()) {
                     item { MessageBubble(ChatMessage("assistant", uiState.streamingText), isStreaming = true) }
                 }
@@ -343,7 +353,11 @@ private fun ErrorBanner(message: String) {
 // ── Message bubble (iMessage style) ──────────────────────────
 
 @Composable
-private fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
+private fun MessageBubble(
+    message: ChatMessage,
+    isStreaming: Boolean = false,
+    onRegenerate: (() -> Unit)? = null
+) {
     val c = Apple.colors
     val isUser = message.role == "user"
 
@@ -404,6 +418,29 @@ private fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
                     }
                 }
             }
+                if (onRegenerate != null && !isUser) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onRegenerate() }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            tint = c.secondaryLabel,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Regenerate",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = c.secondaryLabel
+                        )
+                    }
+                }
         }
     }
 }
@@ -780,6 +817,9 @@ fun HistoryDrawer(
 ) {
     val c = Apple.colors
     var deleteTargetId by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    val filtered = if (query.isBlank()) conversations
+        else conversations.filter { it.title.contains(query, ignoreCase = true) }
 
     Column(Modifier.fillMaxSize().background(c.bg)) {
         Column(Modifier.fillMaxWidth().statusBarsPadding()) {
@@ -813,13 +853,26 @@ fun HistoryDrawer(
             }
         }
 
-        if (conversations.isEmpty()) {
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+            AppleTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = "Search chats…",
+                label = null
+            )
+        }
+
+        if (filtered.isEmpty()) {
             Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                Text("No chats yet", color = c.secondaryLabel, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (conversations.isEmpty()) "No chats yet" else "No matches",
+                    color = c.secondaryLabel,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                items(conversations, key = { it.id }) { conv ->
+                items(filtered, key = { it.id }) { conv ->
                     val isActive = conv.id == activeConvId
                     Row(
                         Modifier

@@ -42,6 +42,34 @@ object BuiltInSkills {
             description = "Ask before deleting or overwriting files.",
             instruction = "Before deleting or overwriting a file, ask the user to confirm first.",
             builtIn = true
+        ),
+        Skill(
+            id = "roman_urdu",
+            name = "Roman Urdu replies",
+            description = "Reply in Roman Urdu / Hinglish.",
+            instruction = "Always reply in Roman Urdu (Hinglish). Keep technical terms (commands, paths, code) in English.",
+            builtIn = true
+        ),
+        Skill(
+            id = "plain_text",
+            name = "Plain text",
+            description = "No markdown, no code fences.",
+            instruction = "Reply in plain text only. Do NOT use markdown, headings, bold, bullet lists, or code fences unless the user explicitly asks.",
+            builtIn = true
+        ),
+        Skill(
+            id = "ask_before_run",
+            name = "Ask before running",
+            description = "Confirm before every command.",
+            instruction = "Before running any command via an action tag, first ask the user to confirm. Only run after the user says yes.",
+            builtIn = true
+        ),
+        Skill(
+            id = "code_only",
+            name = "Code only",
+            description = "Output just the code, minimal words.",
+            instruction = "When the user asks for code, output ONLY the code with minimal words. No long explanations.",
+            builtIn = true
         )
     )
 }

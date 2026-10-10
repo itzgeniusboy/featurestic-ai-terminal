@@ -296,6 +296,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Send a message ───────────────────────────────────────
+    /** Drop the last AI reply and re-run the last user message. */
+    fun regenerate() {
+        if (_uiState.value.isGenerating) return
+        val msgs = _uiState.value.messages
+        val idx = msgs.indexOfLast { it.role == "user" }
+        if (idx < 0) return
+        val lastUserText = msgs[idx].content
+        val trimmed = msgs.subList(0, idx).toList()
+        _uiState.update { it.copy(messages = trimmed, error = null) }
+        sendMessage(lastUserText)
+    }
+
     fun sendMessage(text: String) {
         val hasAttachment = !_uiState.value.pendingImageBase64.isNullOrBlank()
         if ((text.isBlank() && !hasAttachment) || _uiState.value.isGenerating) return
@@ -1680,9 +1692,9 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
     fun checkProcessStatuses() {
         txService?.checkProcessStatuses()
     }
-    // ── Dashboard & FileExplorer helpers ─────────────────────────
+    // ── FileExplorer helper ──────────────────────────────────────
 
-    suspend fun runCommandForDashboard(command: String): String {
+    suspend fun runCommand(command: String): String {
         return try {
             termuxBridge.runCommandAndGetOutput(command, 30).output
         } catch (e: Exception) { "" }

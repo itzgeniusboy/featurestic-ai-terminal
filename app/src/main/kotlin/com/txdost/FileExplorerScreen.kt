@@ -73,7 +73,7 @@ fun FileExplorerScreen(
         files = emptyList()
         try {
             val expandedPath = if (path == "~") "\$HOME" else path
-            val result = viewModel.runCommandForDashboard("ls -la $expandedPath 2>&1 | tail -n +2")
+            val result = viewModel.runCommand("ls -la $expandedPath 2>&1 | tail -n +2")
             if (result.startsWith("ls:") || result.contains("No such file")) {
                 error = result; loading = false; return
             }
@@ -101,7 +101,7 @@ fun FileExplorerScreen(
     suspend fun loadFile(path: String) {
         loading = true
         try {
-            val result = viewModel.runCommandForDashboard("cat '$path' 2>&1")
+            val result = viewModel.runCommand("cat '$path' 2>&1")
             fileContent = result
             editContent = result
         } catch (e: Exception) {
@@ -131,7 +131,7 @@ fun FileExplorerScreen(
                             {
                                 saving = true
                                 scope.launch {
-                                    viewModel.runCommandForDashboard("cat > '$filePath' << 'TXEOF'\n$editContent\nTXEOF")
+                                    viewModel.runCommand("cat > '$filePath' << 'TXEOF'\n$editContent\nTXEOF")
                                     fileContent = editContent
                                     editMode = false
                                     saving = false
@@ -252,7 +252,7 @@ fun FileExplorerScreen(
             onConfirm = {
                 val delPath = if (currentPath == "~") "\$HOME/${target.name}" else "$currentPath/${target.name}"
                 scope.launch {
-                    viewModel.runCommandForDashboard(if (target.isDir) "rm -rf '$delPath'" else "rm -f '$delPath'")
+                    viewModel.runCommand(if (target.isDir) "rm -rf '$delPath'" else "rm -f '$delPath'")
                     loadDir(currentPath)
                 }
                 showDeleteDialog = null
@@ -268,7 +268,7 @@ fun FileExplorerScreen(
             onConfirm = {
                 if (newItemName.isNotBlank()) {
                     val newPath = if (currentPath == "~") "\$HOME/$newItemName" else "$currentPath/$newItemName"
-                    scope.launch { viewModel.runCommandForDashboard("touch '$newPath'"); loadDir(currentPath) }
+                    scope.launch { viewModel.runCommand("touch '$newPath'"); loadDir(currentPath) }
                 }
                 showNewFileDialog = false; newItemName = ""
             }

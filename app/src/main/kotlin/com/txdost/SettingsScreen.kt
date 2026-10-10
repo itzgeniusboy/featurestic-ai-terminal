@@ -96,6 +96,15 @@ fun SettingsScreen(
     var showPicker by remember { mutableStateOf(false) }
     var loadingId by remember { mutableStateOf<String?>(null) }
     val providerStatus = remember { mutableStateMapOf<String, String>() }
+    var showResetDialog by remember { mutableStateOf(false) }
+
+    val appVersion = remember {
+        try {
+            val pi = app.packageManager.getPackageInfo(app.packageName, 0)
+            val code = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+            "v${pi.versionName} (build $code)"
+        } catch (e: Exception) { "" }
+    }
 
     val connected = chatViewModel?.uiState?.value?.termuxConnected == true
     val activeProviderName = ProviderRegistry.byId(providerId).name
@@ -307,7 +316,51 @@ fun SettingsScreen(
             Column(Modifier.padding(horizontal = 16.dp)) {
                 AppleButton("Save prompt & search", { saveSettings() }, modifier = Modifier.fillMaxWidth())
             }
+
+            Spacer(Modifier.height(28.dp))
+            AppleSectionHeader("Danger zone")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleButton(
+                    "Reset all data",
+                    { showResetDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    style = AppleButtonStyle.Destructive
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "Featurestic AI Terminal $appVersion",
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall,
+                color = c.secondaryLabel
+            )
             Spacer(Modifier.height(40.dp))
+        }
+    }
+
+    if (showResetDialog) {
+        AppleAlertDialog(
+            title = "Reset all data?",
+            onDismiss = { showResetDialog = false },
+            confirmText = "Reset",
+            onConfirm = {
+                showResetDialog = false
+                scope.launch {
+                    prefs.clearAll()
+                    keys.clear()
+                    systemPrompt = ""; searchProvider = "DUCKDUCKGO"
+                    tavilyKey = ""; firecrawlKey = ""
+                    status = "All data reset"
+                }
+            },
+            destructive = true
+        ) {
+            Text(
+                "Saari API keys, models, prompt, skills aur settings delete ho jaayengi. Ye undo nahi hota.",
+                color = c.secondaryLabel
+            )
         }
     }
 

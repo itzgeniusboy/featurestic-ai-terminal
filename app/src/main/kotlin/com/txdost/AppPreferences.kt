@@ -97,4 +97,7 @@ class AppPreferences(private val context: Context) {
     suspend fun saveModelCatalog(json: String) = context.dataStore.edit { it[MODEL_CATALOG] = json }
     suspend fun saveAgentMode(mode: String) = context.dataStore.edit { it[AGENT_MODE] = mode }
     suspend fun saveSkills(json: String) = context.dataStore.edit { it[SKILLS_JSON] = json }
+
+    /** Wipe every stored preference (keys, models, prompt, skills, catalog). */
+    suspend fun clearAll() = context.dataStore.edit { it.clear() }
 }

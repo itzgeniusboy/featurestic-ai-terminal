@@ -20,7 +20,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import com.txdost.ui.screens.ChatScreen
-import com.txdost.ui.screens.FileScreen
 import com.txdost.ui.screens.SettingsScreen
 import com.txdost.ui.screens.FileExplorerScreen
 import com.txdost.ui.screens.SkillsScreen
@@ -122,9 +121,6 @@ fun AppNavigation(initialConvId: String? = null) {
                 onBack = { navController.popBackStack() },
                 onNavigateToTermuxSetup = { navController.navigate("termux_setup") }
             )
-        }
-        composable("files") {
-            FileScreen(onBack = { navController.popBackStack() })
         }
         composable("termux_setup") {
             TermuxSetupScreen(onBack = { navController.popBackStack() })
