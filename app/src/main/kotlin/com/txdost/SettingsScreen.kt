@@ -37,7 +37,8 @@ private val HCard     = Color(0xFF0A0F0A)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToTermuxSetup: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val prefs = remember { AppPreferences(context) }
@@ -155,6 +156,29 @@ fun SettingsScreen(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // ── Termux connection ────────────────────────────
+                HackerSection("[ TERMUX_CONNECTION ]") {
+                    Text(
+                        "3 step me phone ko AI terminal se connect karo. Script app me bundled hai.",
+                        color = HGreenDim.copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                    )
+                    Button(
+                        onClick = onNavigateToTermuxSetup,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF001A00)),
+                        shape = RoundedCornerShape(2.dp),
+                        border = BorderStroke(1.dp, HCyan)
+                    ) {
+                        Icon(Icons.Default.Terminal, contentDescription = null, tint = HCyan, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            ">> TERMUX SETUP / CONNECT",
+                            color = HCyan, fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 // ── Provider ─────────────────────────────────────
                 HackerSection("[ PROVIDER ]") {
                     Box {

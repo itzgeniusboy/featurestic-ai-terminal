@@ -24,6 +24,7 @@ import com.txdost.ui.screens.ProcessManagerScreen
 import com.txdost.ui.screens.SettingsScreen
 import com.txdost.ui.screens.DashboardScreen
 import com.txdost.ui.screens.FileExplorerScreen
+import com.txdost.ui.screens.TermuxSetupScreen
 import com.txdost.ui.theme.OllamaAppTheme
 import com.txdost.viewmodel.ChatViewModel
 
@@ -113,7 +114,8 @@ fun AppNavigation(initialConvId: String? = null) {
         }
         composable("settings") {
             SettingsScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onNavigateToTermuxSetup = { navController.navigate("termux_setup") }
             )
         }
         composable("files") {
@@ -121,6 +123,9 @@ fun AppNavigation(initialConvId: String? = null) {
         }
         composable("processes") {
             ProcessManagerScreen(onBack = { navController.popBackStack() })
+        }
+        composable("termux_setup") {
+            TermuxSetupScreen(onBack = { navController.popBackStack() })
         }
         composable("dashboard") {
             DashboardScreen(onBack = { navController.popBackStack() })

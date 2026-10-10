@@ -18,6 +18,8 @@ class TermuxBridge(private val context: Context) {
     companion object {
         const val TERMUX_PACKAGE = "com.termux"
         const val SERVER_URL = "http://127.0.0.1:8080"
+        const val TERMUX_BIN = "/data/data/com.termux/files/usr"
+        const val TERMUX_HOME = "/data/data/com.termux/files/home"
     }
 
     // Standard client — most requests
@@ -218,6 +220,24 @@ class TermuxBridge(private val context: Context) {
         context.packageManager.getLaunchIntentForPackage(TERMUX_PACKAGE)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?.let { context.startActivity(it) }
+    }
+
+    // Run a shell command inside Termux via the RUN_COMMAND service (1-tap setup).
+    // Requires Termux's allow-external-apps=true (one-time) + our manifest permission.
+    fun runCommandViaTermux(command: String, background: Boolean = true): Boolean {
+        return try {
+            val intent = Intent()
+            intent.setClassName(TERMUX_PACKAGE, "com.termux.app.RunCommandService")
+            intent.action = "com.termux.RUN_COMMAND"
+            intent.putExtra("com.termux.RUN_COMMAND_PATH", "$TERMUX_BIN/bin/bash")
+            intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-c", command))
+            intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME)
+            intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", background)
+            context.startService(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     suspend fun postJson(endpoint: String, jsonBody: String): String = withContext(Dispatchers.IO) {

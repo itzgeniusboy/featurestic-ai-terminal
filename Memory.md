@@ -28,6 +28,8 @@
 
 - 2026-10-11: Added `termux/server.py` (bridge v6.0 — rebranded, keeps all v5.1 endpoints + NEW OpenAI model-proxy `/v1/chat/completions` & `/v1/models` using `X-Provider-Base` header) and `termux/install.sh` (one-line installer: permission + python/curl + download server + ~/.bashrc autostart + start + ping). Verified locally on Termux: /ping, /run, /info, /write, /file, and proxy streaming through a mock provider all pass; missing-header returns 400.
 
+- 2026-10-11: Added in-app `TermuxSetupScreen` (Settings → TERMUX SETUP / CONNECT). Server script bundled as asset `app/src/main/assets/termux_install.sh` (self-contained — server.py embedded, no GitHub needed). Screen: 1-TAP CONNECT button (Termux RUN_COMMAND intent, script sent base64) + manual fallback (download to Downloads, copy `termux-setup-storage` and `bash ~/storage/downloads/featurestic-install.sh`). Added `TermuxBridge.runCommandViaTermux`, WRITE_EXTERNAL_STORAGE (maxSdk 28) in manifest. Base64 pipeline tested locally (19,288 chars decode+syntax OK). User never sees GitHub.
+
 ## Next Steps
 - Optional: in-app "Setup Server" button (Termux RUN_COMMAND intent) for fully 1-tap setup.
 - Optionally test each provider's live free-model fetch on-device.
