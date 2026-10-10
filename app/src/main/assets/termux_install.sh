@@ -28,6 +28,7 @@ cat > ~/txdost/server.py <<'FEATURESTIC_SERVER_PYEOF'
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import subprocess, json, os, signal, time, urllib.request, urllib.error
+import threading, queue, uuid
 
 PORT = 8080
 _PFX = "/data/data/com.termux/files/usr"
@@ -55,6 +56,86 @@ def run_cmd(cmd, timeout=60, workdir=None):
         return str(e), -1, False
 
 
+# ── Persistent shell sessions (Termux-like: cd / env / state persist) ──
+class ShellSession:
+    """A long-lived `bash` process. Commands are written to its stdin and
+    output is read until a unique end-marker, so working directory, exported
+    variables, functions and aliases all persist between calls."""
+
+    def __init__(self):
+        self.proc = subprocess.Popen(
+            ["bash"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, cwd=_HOM, env=_ENV,
+        )
+        self.q = queue.Queue()
+        self.lock = threading.Lock()
+        self.counter = 0
+        threading.Thread(target=self._read_loop, daemon=True).start()
+
+    def _read_loop(self):
+        try:
+            for line in self.proc.stdout:
+                self.q.put(line)
+        except Exception:
+            pass
+        finally:
+            self.q.put(None)
+
+    def run(self, cmd, timeout=120):
+        with self.lock:
+            self.counter += 1
+            marker = f"__FSDONE_{os.getpid()}_{self.counter}__"
+            try:
+                self.proc.stdin.write(f"{cmd}\nprintf '{marker}%s\\n' \"$?\"\n")
+                self.proc.stdin.flush()
+            except Exception as e:
+                return f"session closed: {e}", -1, False
+            buf = []
+            deadline = time.time() + timeout
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    buf.append("\n[Featurestic] command timed out (interactive apps not supported — use background run)")
+                    return "".join(buf).strip(), -1, False
+                try:
+                    line = self.q.get(timeout=remaining)
+                except queue.Empty:
+                    buf.append("\n[Featurestic] command timed out (interactive apps not supported — use background run)")
+                    return "".join(buf).strip(), -1, False
+                if line is None:
+                    return ("".join(buf).strip() + "\n[session ended]").strip(), -1, False
+                if marker in line:
+                    code = line.split(marker, 1)[1].strip()
+                    code = int(code) if code.lstrip("-").isdigit() else 0
+                    return "".join(buf).rstrip("\n"), code, code == 0
+                buf.append(line)
+
+    def kill(self):
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+
+
+_SESSIONS = {}
+_SESS_LOCK = threading.Lock()
+
+
+def _get_or_create_session(sid):
+    with _SESS_LOCK:
+        s = _SESSIONS.get(sid) if sid else None
+        if s is None:
+            sid = uuid.uuid4().hex[:12]
+            s = ShellSession()
+            _SESSIONS[sid] = s
+        return sid, s
+
+
 class Server(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -74,6 +155,8 @@ class H(BaseHTTPRequestHandler):
 
     def _body(self):
         n = int(self.headers.get("Content-Length", 0))
+        if n <= 0:
+            return {}
         try:
             return json.loads(self.rfile.read(n))
         except Exception:
@@ -119,7 +202,7 @@ class H(BaseHTTPRequestHandler):
     # ── GET ────────────────────────────────────────────────────
     def do_GET(self):
         if self.path == "/ping":
-            self._send(200, {"status": "ok", "version": "6.0", "name": "Featurestic AI Terminal"})
+            self._send(200, {"status": "ok", "version": "6.1", "name": "Featurestic AI Terminal"})
         elif self.path == "/v1/models":
             self._proxy_stream("/models")
         elif self.path == "/info":
@@ -151,6 +234,10 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/list_processes":
             out, _, ok = run_cmd("ps aux | grep -E '(python|node|bash|perl)' | grep -v grep")
             self._send(200, {"output": out, "success": ok})
+        elif self.path == "/session/list":
+            with _SESS_LOCK:
+                ids = list(_SESSIONS.keys())
+            self._send(200, {"sessions": ids, "count": len(ids)})
         elif self.path.startswith("/file?"):
             path = os.path.expanduser(self.path.split("?", 1)[1])
             try:
@@ -173,7 +260,28 @@ class H(BaseHTTPRequestHandler):
             self._send(400, {"error": "Invalid JSON"})
             return
 
-        if self.path == "/run":
+        if self.path == "/session/new":
+            sid, _ = _get_or_create_session(None)
+            self._send(200, {"id": sid, "success": True})
+        elif self.path == "/session/run":
+            cmd = d.get("command", "")
+            if not cmd.strip():
+                self._send(400, {"error": "command required"})
+                return
+            timeout = min(int(d.get("timeout", 120)), 600)
+            sid, sess = _get_or_create_session(d.get("id"))
+            out, code, ok = sess.run(cmd, timeout)
+            self._send(200, {"id": sid, "output": out, "exit_code": code, "success": ok})
+        elif self.path == "/session/kill":
+            sid = d.get("id", "")
+            with _SESS_LOCK:
+                sess = _SESSIONS.pop(sid, None)
+            if sess:
+                sess.kill()
+                self._send(200, {"success": True})
+            else:
+                self._send(200, {"success": False, "error": "no such session"})
+        elif self.path == "/run":
             cmd = d.get("command", "").strip()
             timeout = min(int(d.get("timeout", 60)), 600)
             wd = os.path.expanduser(d.get("workdir", "~"))
@@ -294,7 +402,7 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     s = Server(("127.0.0.1", PORT), H)
-    print(f"[Featurestic AI Terminal bridge v6.0] Port {PORT} | model-proxy ready")
+    print(f"[Featurestic AI Terminal bridge v6.1] Port {PORT} | sessions + model-proxy ready")
     try:
         s.serve_forever()
     except KeyboardInterrupt:

@@ -146,6 +146,66 @@ class TermuxBridge(private val context: Context) {
             }
         }
 
+    // ── Persistent shell sessions (Termux-like state) ────────
+    // Create a new persistent bash session; returns its id (or null on failure).
+    suspend fun sessionNew(): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = "{}".toRequestBody("application/json".toMediaType())
+            val req = Request.Builder().url("$SERVER_URL/session/new").post(body).build()
+            val res = client.newCall(req).execute()
+            val json = JSONObject(res.body?.string() ?: "{}")
+            json.optString("id").ifBlank { null }
+        } catch (e: Exception) { null }
+    }
+
+    // Run a command inside a persistent session. If id is null/blank the server
+    // creates a new session and returns its id in the result.
+    suspend fun sessionRun(id: String, command: String, timeoutSec: Int = 120): SessionResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JSONObject()
+                    .put("id", id)
+                    .put("command", command)
+                    .put("timeout", timeoutSec.coerceAtMost(600))
+                    .toString()
+                    .toRequestBody("application/json".toMediaType())
+                val req = Request.Builder().url("$SERVER_URL/session/run").post(body).build()
+                val res = longClient.newCall(req).execute()
+                val json = JSONObject(res.body?.string() ?: "{}")
+                SessionResult(
+                    id       = json.optString("id", id),
+                    output   = json.optString("output", ""),
+                    exitCode = json.optInt("exit_code", -1),
+                    success  = json.optBoolean("success", false)
+                )
+            } catch (e: Exception) {
+                SessionResult(id, "Connection error: ${e.message}", -1, false)
+            }
+        }
+
+    suspend fun sessionKill(id: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().put("id", id).toString()
+                .toRequestBody("application/json".toMediaType())
+            val req = Request.Builder().url("$SERVER_URL/session/kill").post(body).build()
+            client.newCall(req).execute().isSuccessful
+        } catch (e: Exception) { false }
+    }
+
+    // ── Storage access (phone files, Termux-like) ────────────
+    // Ask Termux to run termux-setup-storage (grants ~/storage symlinks to /sdcard).
+    fun requestStorageSetup() {
+        runCommandViaTermux("termux-setup-storage", background = false)
+    }
+
+    suspend fun hasStorageAccess(): Boolean = withContext(Dispatchers.IO) {
+        val r = runCommandAndGetOutput(
+            "test -d /sdcard/Download && (ls /sdcard >/dev/null 2>&1 && echo FS_OK || echo FS_NO) || echo FS_NO",
+            10
+        )
+        r.output.contains("FS_OK")
+    }
+
     // File Termux mein likho
     suspend fun writeFile(path: String, content: String): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -298,6 +358,13 @@ class TermuxBridge(private val context: Context) {
 }
 
 data class CommandResult(
+    val output: String,
+    val exitCode: Int,
+    val success: Boolean
+)
+
+data class SessionResult(
+    val id: String,
     val output: String,
     val exitCode: Int,
     val success: Boolean

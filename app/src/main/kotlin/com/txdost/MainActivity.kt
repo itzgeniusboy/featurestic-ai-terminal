@@ -23,6 +23,7 @@ import com.txdost.ui.screens.ChatScreen
 import com.txdost.ui.screens.SettingsScreen
 import com.txdost.ui.screens.FileExplorerScreen
 import com.txdost.ui.screens.SkillsScreen
+import com.txdost.ui.screens.TerminalScreen
 import com.txdost.ui.screens.TermuxSetupScreen
 import com.txdost.ui.theme.FeaturesticTheme
 import com.txdost.viewmodel.ChatViewModel
@@ -107,6 +108,7 @@ fun AppNavigation(initialConvId: String? = null) {
                 onNavigateToSettings  = { navController.navigate("settings") },
                 onNavigateToFiles     = { navController.navigate("file_explorer") },
                 onNavigateToSkills    = { navController.navigate("skills") },
+                onNavigateToTerminal  = { navController.navigate("terminal") },
                 chatViewModel         = chatViewModel
             )
         }
@@ -115,6 +117,9 @@ fun AppNavigation(initialConvId: String? = null) {
                 onBack = { navController.popBackStack() },
                 chatViewModel = chatViewModel
             )
+        }
+        composable("terminal") {
+            TerminalScreen(onBack = { navController.popBackStack() })
         }
         composable("settings") {
             SettingsScreen(

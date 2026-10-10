@@ -44,6 +44,7 @@ fun ChatScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToFiles: () -> Unit,
     onNavigateToSkills: () -> Unit = {},
+    onNavigateToTerminal: () -> Unit = {},
     chatViewModel: ChatViewModel = viewModel()
 ) {
     val uiState by chatViewModel.uiState.collectAsState()
@@ -98,7 +99,7 @@ fun ChatScreen(
                 onClear = { showClearDialog = true },
                 onSchedule = { showScheduleDialog = true },
                 onFiles = onNavigateToFiles,
-                onSkills = onNavigateToSkills,
+                onTerminal = onNavigateToTerminal,
                 onSettings = onNavigateToSettings
             )
 
@@ -253,6 +254,7 @@ private fun ChatNavBar(
     onSchedule: () -> Unit,
     onFiles: () -> Unit,
     onSkills: () -> Unit,
+    onTerminal: () -> Unit,
     onSettings: () -> Unit
 ) {
     val c = Apple.colors
@@ -277,6 +279,7 @@ private fun ChatNavBar(
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     AppleMenuItem("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
+                    AppleMenuItem("Terminal", Icons.Rounded.Terminal) { menu = false; onTerminal() }
                     AppleMenuItem("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
                     AppleMenuItem("Skills", Icons.Rounded.AutoAwesome) { menu = false; onSkills() }
                     AppleMenuItem("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
