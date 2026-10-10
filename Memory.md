@@ -52,3 +52,4 @@
 
 ## Open Questions
 - Whether to rename package `com.txdost` / class `TxDostService` (currently kept intentionally).
+- 2026-10-11: Phase 2/4 — `Conversation.pinned` + `ChatHistory.setPinned`; `ChatViewModel.renameConversation`/`pinConversation`; `HistoryDrawer` rename/pin icons wired at ChatScreen call site. Theme toggle (System/Light/Dark) via new `AppPreferences.THEME_MODE` + Settings "Appearance" segmented control + `MainActivity` reads flow → `FeaturesticTheme(darkTheme=…)`. Voice input: mic button in `ChatInputBar` (RecognizerIntent launcher). Settings Backup: "Export"/"Import" JSON of keys/models/prompt/skills (`AppPreferences.exportJson()`/`importJson`, SAF CreateDocument/OpenDocument). Version bumped versionCode 2→3, versionName 1.1→1.2. Commits 38092084341 (pinned-field fix) then 38092404916 SUCCESS. APK copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-v1.2-debug.apk`.
