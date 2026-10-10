@@ -124,7 +124,7 @@ fun DashboardScreen(
                         .clickable { autoRefresh = !autoRefresh }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
-                IconButton(onClick = { fetchStats(viewModel) }) {
+                IconButton(onClick = { scope.launch { fetchStats(viewModel) } }) {
                     Icon(Icons.Rounded.Refresh, "Refresh", tint = c2.blue)
                 }
             }
