@@ -1,34 +1,54 @@
 package com.txdost.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.txdost.data.AppPreferences
 import com.txdost.data.LlmClient
 import com.txdost.data.ModelInfo
 import com.txdost.data.ProviderRegistry
+import com.txdost.data.ProviderSpec
 import com.txdost.ui.components.*
 import com.txdost.ui.theme.Apple
 import com.txdost.viewmodel.ChatViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
@@ -42,79 +62,79 @@ fun SettingsScreen(
     val prefs = remember { AppPreferences(app) }
     val scope = rememberCoroutineScope()
 
+    val keys = remember { mutableStateMapOf<String, String>() }
+    LaunchedEffect(Unit) {
+        ProviderRegistry.all.forEach { spec -> keys[spec.id] = prefs.apiKeyFor(spec.id).first() }
+    }
+
     val providerId by remember { prefs.providerId }.collectAsState(initial = ProviderRegistry.default.id)
-    val apiKeyFlow = remember(providerId) { prefs.apiKeyFor(providerId) }
-    val modelFlow = remember(providerId) { prefs.modelFor(providerId) }
-    val apiKeyStored by apiKeyFlow.collectAsState(initial = "")
-    val modelStored by modelFlow.collectAsState(initial = "")
+    val activeModel by remember(providerId) { prefs.modelFor(providerId) }.collectAsState(initial = "")
+
     val systemPromptStored by remember { prefs.systemPrompt }.collectAsState(initial = "")
-    val proxyStored by remember { prefs.useTermuxProxy }.collectAsState(initial = false)
-    val proxyUrlStored by remember { prefs.termuxProxyUrl }.collectAsState(initial = "http://127.0.0.1:8080/v1")
     val searchStored by remember { prefs.webSearchProvider }.collectAsState(initial = "DUCKDUCKGO")
     val tavilyStored by remember { prefs.tavilyApiKey }.collectAsState(initial = "")
     val firecrawlStored by remember { prefs.firecrawlApiKey }.collectAsState(initial = "")
-    val tempStored by remember { prefs.temperature }.collectAsState(initial = 0.7f)
 
-    var apiKey by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
     var systemPrompt by remember { mutableStateOf("") }
-    var proxyEnabled by remember { mutableStateOf(false) }
-    var proxyUrl by remember { mutableStateOf("http://127.0.0.1:8080/v1") }
     var searchProvider by remember { mutableStateOf("DUCKDUCKGO") }
     var tavilyKey by remember { mutableStateOf("") }
     var firecrawlKey by remember { mutableStateOf("") }
-    var temperature by remember { mutableStateOf(0.7f) }
-
-    var apiKeyVisible by remember { mutableStateOf(false) }
     var tavilyVisible by remember { mutableStateOf(false) }
     var firecrawlVisible by remember { mutableStateOf(false) }
-
-    var availableModels by remember { mutableStateOf<List<ModelInfo>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("") }
-    var providerMenu by remember { mutableStateOf(false) }
-    var modelMenu by remember { mutableStateOf(false) }
     var searchMenu by remember { mutableStateOf(false) }
 
-    LaunchedEffect(providerId, apiKeyStored) { apiKey = apiKeyStored }
-    LaunchedEffect(providerId, modelStored) { model = modelStored }
     LaunchedEffect(systemPromptStored) { systemPrompt = systemPromptStored }
-    LaunchedEffect(proxyStored) { proxyEnabled = proxyStored }
-    LaunchedEffect(proxyUrlStored) { proxyUrl = proxyUrlStored }
     LaunchedEffect(searchStored) { searchProvider = searchStored }
     LaunchedEffect(tavilyStored) { tavilyKey = tavilyStored }
     LaunchedEffect(firecrawlStored) { firecrawlKey = firecrawlStored }
-    LaunchedEffect(tempStored) { temperature = tempStored }
 
-    val provider = ProviderRegistry.byId(providerId)
+    var modelsByProvider by remember { mutableStateOf<Map<String, List<ModelInfo>>>(emptyMap()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    var showPicker by remember { mutableStateOf(false) }
 
-    fun refreshModels() {
+    val connected = chatViewModel?.uiState?.value?.termuxConnected == true
+    val activeProviderName = ProviderRegistry.byId(providerId).name
+
+    fun connect() {
         isLoading = true
-        status = "Loading free models…"
+        status = "Connecting…"
+        val snapshot = ProviderRegistry.all.associateWith { keys[it.id].orEmpty().trim() }
         scope.launch {
-            val result = com.txdost.data.LlmClient().getModels(provider, apiKey)
+            snapshot.forEach { (spec, key) -> if (key.isNotEmpty()) prefs.saveApiKeyFor(spec.id, key) }
+            val results = coroutineScope {
+                snapshot.map { (spec, key) ->
+                    async {
+                        if (key.isBlank()) spec.id to emptyList<ModelInfo>()
+                        else spec.id to LlmClient().getModels(spec, key).getOrDefault(emptyList())
+                    }
+                }.awaitAll()
+            }
+            val map = LinkedHashMap<String, List<ModelInfo>>()
+            results.forEach { (id, list) -> if (list.isNotEmpty()) map[id] = list }
+            modelsByProvider = map
             isLoading = false
-            result.onSuccess { list ->
-                availableModels = list
-                if (model.isBlank() && list.isNotEmpty()) model = list.first().id
-                status = if (list.isEmpty()) "No free models found for ${provider.name}"
-                else "${list.size} free model(s) loaded"
-            }.onFailure { status = "Failed: ${it.message ?: "unknown error"}" }
+            val total = map.values.sumOf { it.size }
+            status = if (total == 0) "No models found — check your API keys"
+            else "Connected · $total model(s) from ${map.size} provider(s)"
+        }
+    }
+
+    var autoTried by remember { mutableStateOf(false) }
+    LaunchedEffect(keys.size) {
+        if (!autoTried && keys.values.any { it.isNotBlank() }) {
+            autoTried = true
+            connect()
         }
     }
 
     fun saveAll() {
         scope.launch {
-            prefs.saveProviderId(providerId)
-            prefs.saveApiKeyFor(providerId, apiKey.trim())
-            prefs.saveModelFor(providerId, model.trim())
+            ProviderRegistry.all.forEach { spec -> prefs.saveApiKeyFor(spec.id, keys[spec.id].orEmpty().trim()) }
             prefs.saveSystemPrompt(systemPrompt)
-            prefs.saveUseTermuxProxy(proxyEnabled)
-            prefs.saveTermuxProxyUrl(proxyUrl.trim())
             prefs.saveWebSearchProvider(searchProvider)
             prefs.saveTavilyApiKey(tavilyKey.trim())
             prefs.saveFirecrawlApiKey(firecrawlKey.trim())
-            prefs.saveTemperature(temperature)
             status = "Settings saved"
         }
     }
@@ -128,113 +148,84 @@ fun SettingsScreen(
                 .padding(bottom = 40.dp)
         ) {
 
-            AppleSectionHeader("Termux")
+            // ── Termux ─────────────────────────────────────────
+            AppleSectionHeader("Termux — runs your tools")
             AppleGroup {
                 AppleRow(
-                    title = "Setup & connect server",
-                    subtitle = if (chatViewModel?.uiState?.value?.termuxConnected == true) "Connected" else "Not connected",
+                    title = "Server",
+                    subtitle = if (connected) "Connected — tools ready" else "Not connected",
                     icon = Icons.Rounded.Terminal,
-                    iconTint = c.green,
-                    showChevron = true,
-                    showDivider = false,
-                    onClick = onNavigateToTermuxSetup
+                    iconTint = if (connected) c.green else c.gray,
+                    trailingText = if (connected) "Online" else "Offline",
+                    valueColor = if (connected) c.green else c.secondaryLabel,
+                    showDivider = true
                 )
-            }
-
-            AppleSectionHeader("AI provider")
-            AppleGroup {
-                Box {
-                    AppleRow(
-                        title = "Provider",
-                        icon = Icons.Rounded.Cloud,
-                        trailingText = provider.name,
-                        showChevron = true,
-                        showDivider = false,
-                        onClick = { providerMenu = true }
+                Box(Modifier.padding(16.dp)) {
+                    AppleButton(
+                        "Connect & run tools",
+                        { onNavigateToTermuxSetup() },
+                        Modifier.fillMaxWidth(),
+                        icon = Icons.Rounded.Bolt
                     )
-                    DropdownMenu(expanded = providerMenu, onDismissRequest = { providerMenu = false }) {
-                        ProviderRegistry.all.forEach { p ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        p.name,
-                                        color = if (p.id == providerId) c.blue else c.label,
-                                        fontWeight = if (p.id == providerId) FontWeight.SemiBold else FontWeight.Normal
-                                    )
-                                },
-                                onClick = {
-                                    providerMenu = false
-                                    availableModels = emptyList()
-                                    scope.launch { prefs.saveProviderId(p.id) }
-                                }
-                            )
-                        }
-                    }
                 }
             }
 
-            AppleSectionHeader("API key")
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                AppleTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    placeholder = "Paste your ${provider.name} key",
-                    visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailing = {
-                        IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
-                            Icon(
-                                if (apiKeyVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                null,
-                                tint = c.secondaryLabel
-                            )
-                        }
-                    }
+            // ── Providers ──────────────────────────────────────
+            AppleSectionHeader("AI providers — paste one or more keys")
+            ProviderRegistry.all.forEach { spec ->
+                ProviderKeyCard(
+                    spec = spec,
+                    value = keys[spec.id].orEmpty(),
+                    onValueChange = { keys[spec.id] = it },
+                    isActive = spec.id == providerId
                 )
-                Spacer(Modifier.height(8.dp))
-                AppleButton("Load free models", { refreshModels() }, style = AppleButtonStyle.Tinted, loading = isLoading, modifier = Modifier.fillMaxWidth())
+            }
+            Spacer(Modifier.height(10.dp))
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleButton(
+                    "Connect & load models",
+                    { connect() },
+                    Modifier.fillMaxWidth(),
+                    style = AppleButtonStyle.Filled,
+                    icon = Icons.Rounded.Cloud,
+                    loading = isLoading
+                )
                 if (status.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text(status, style = MaterialTheme.typography.bodySmall, color = c.secondaryLabel)
                 }
             }
 
-            AppleSectionHeader("Model")
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                Box {
-                    AppleRow(
-                        title = "Active model",
-                        subtitle = if (model.isBlank()) "None selected" else (availableModels.firstOrNull { it.id == model }?.name ?: model),
-                        icon = Icons.Rounded.Memory,
-                        showChevron = availableModels.isNotEmpty(),
-                        showDivider = false,
-                        onClick = { if (availableModels.isNotEmpty()) modelMenu = true }
-                    )
-                    DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                        availableModels.forEach { m ->
-                            DropdownMenuItem(
-                                text = { Text(m.name, color = if (m.id == model) c.blue else c.label) },
-                                onClick = { modelMenu = false; model = m.id }
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                AppleTextField(value = model, onValueChange = { model = it }, placeholder = "model id", label = "Model id")
-            }
-
-            AppleSectionHeader("Termux proxy")
+            // ── Models ─────────────────────────────────────────
+            AppleSectionHeader("Models")
             AppleGroup {
-                AppleSwitchRow(
-                    title = "Route via Termux",
-                    subtitle = "Model calls go through your local server",
-                    checked = proxyEnabled,
-                    onCheckedChange = { proxyEnabled = it }
+                AppleRow(
+                    title = "Active model",
+                    subtitle = if (activeModel.isBlank()) "None selected — tap to switch"
+                    else "$activeProviderName · $activeModel",
+                    icon = Icons.Rounded.Memory,
+                    showChevron = true,
+                    showDivider = false,
+                    onClick = {
+                        if (modelsByProvider.isNotEmpty()) showPicker = true
+                        else status = "Tap Connect & load models first"
+                    }
                 )
-                Column(Modifier.padding(16.dp)) {
-                    AppleTextField(value = proxyUrl, onValueChange = { proxyUrl = it }, placeholder = "http://127.0.0.1:8080/v1")
-                }
             }
 
+            // ── System prompt ──────────────────────────────────
+            AppleSectionHeader("System prompt")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleTextField(
+                    value = systemPrompt,
+                    onValueChange = { systemPrompt = it },
+                    placeholder = "Leave empty for the default Featurestic prompt",
+                    singleLine = false,
+                    maxLines = 8
+                )
+            }
+
+            // ── Web search ─────────────────────────────────────
             AppleSectionHeader("Web search")
             AppleGroup {
                 Box {
@@ -281,40 +272,6 @@ fun SettingsScreen(
                 }
             }
 
-            AppleSectionHeader("System prompt")
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                AppleTextField(
-                    value = systemPrompt,
-                    onValueChange = { systemPrompt = it },
-                    placeholder = "Leave empty for the default Featurestic prompt",
-                    singleLine = false,
-                    maxLines = 8
-                )
-            }
-
-            AppleSectionHeader("Generation")
-            AppleGroup {
-                Column(Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Temperature", style = MaterialTheme.typography.bodyLarge, color = c.label)
-                        Text("%.2f".format(temperature), style = MaterialTheme.typography.bodyLarge, color = c.blue, fontWeight = FontWeight.SemiBold)
-                    }
-                    Slider(
-                        value = temperature,
-                        onValueChange = { temperature = it },
-                        onValueChangeFinished = { scope.launch { prefs.saveTemperature(temperature) } },
-                        valueRange = 0f..2f,
-                        steps = 39,
-                        colors = SliderDefaults.colors(
-                            thumbColor = c.blue,
-                            activeTrackColor = c.blue,
-                            inactiveTrackColor = c.fill
-                        )
-                    )
-                    Text("0 = precise • 0.7 = balanced • 2 = creative", style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
-                }
-            }
-
             Spacer(Modifier.height(20.dp))
             Column(Modifier.padding(horizontal = 16.dp)) {
                 AppleButton("Save changes", { saveAll() }, modifier = Modifier.fillMaxWidth())
@@ -322,4 +279,154 @@ fun SettingsScreen(
             Spacer(Modifier.height(40.dp))
         }
     }
+
+    if (showPicker) {
+        ModelPickerDialog(
+            modelsByProvider = modelsByProvider,
+            activeProviderId = providerId,
+            activeModelId = activeModel,
+            onDismiss = { showPicker = false },
+            onPick = { pid, mid ->
+                scope.launch {
+                    prefs.saveProviderId(pid)
+                    prefs.saveModelFor(pid, mid)
+                }
+                showPicker = false
+            }
+        )
+    }
+}
+
+// ── Provider key card ─────────────────────────────────────────
+@Composable
+private fun ProviderKeyCard(
+    spec: ProviderSpec,
+    value: String,
+    onValueChange: (String) -> Unit,
+    isActive: Boolean
+) {
+    val c = Apple.colors
+    var visible by remember { mutableStateOf(false) }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
+        AppleCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(spec.name, style = MaterialTheme.typography.titleSmall, color = c.label)
+                Spacer(Modifier.weight(1f))
+                if (isActive) AppleBadge("Active")
+            }
+            Spacer(Modifier.height(8.dp))
+            AppleTextField(
+                value = value,
+                onValueChange = onValueChange,
+                placeholder = if (spec.keyHint.isNotBlank()) spec.keyHint else "Paste API key",
+                label = "API key",
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailing = {
+                    IconButton(onClick = { visible = !visible }) {
+                        Icon(if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null, tint = c.secondaryLabel)
+                    }
+                }
+            )
+        }
+    }
+}
+
+// ── Model picker ──────────────────────────────────────────────
+@Composable
+private fun ModelPickerDialog(
+    modelsByProvider: Map<String, List<ModelInfo>>,
+    activeProviderId: String,
+    activeModelId: String,
+    onDismiss: () -> Unit,
+    onPick: (String, String) -> Unit
+) {
+    val c = Apple.colors
+    var query by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(color = c.bg, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+            Column(Modifier.fillMaxSize()) {
+                AppleTopBar(title = "Select model", subtitle = "Tap to switch", onBack = onDismiss)
+                Box(Modifier.padding(16.dp)) {
+                    AppleTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = "Search all models…",
+                        label = "Search",
+                        trailing = { Icon(Icons.Rounded.Search, null, tint = c.secondaryLabel) }
+                    )
+                }
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 32.dp)
+                ) {
+                    modelsByProvider.forEach { (pid, list) ->
+                        val spec = ProviderRegistry.byId(pid)
+                        val filtered = list.filter {
+                            query.isBlank() || it.id.contains(query, true) || it.name.contains(query, true)
+                        }
+                        if (filtered.isNotEmpty()) {
+                            item(key = "h_$pid") {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(spec.name.uppercase(), style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("(${filtered.size})", style = MaterialTheme.typography.labelSmall, color = c.tertiaryLabel)
+                                }
+                            }
+                            items(filtered, key = { "$pid:${it.id}" }) { m ->
+                                ModelRow(
+                                    model = m,
+                                    selected = pid == activeProviderId && m.id == activeModelId,
+                                    onClick = { onPick(pid, m.id) }
+                                )
+                            }
+                        }
+                    }
+                    if (modelsByProvider.values.all { list ->
+                            query.isBlank() || list.none { it.id.contains(query, true) || it.name.contains(query, true) }
+                        }
+                    ) {
+                        item {
+                            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                                Text("No matching models", style = MaterialTheme.typography.bodyMedium, color = c.secondaryLabel)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelRow(model: ModelInfo, selected: Boolean, onClick: () -> Unit) {
+    val c = Apple.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                model.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (selected) c.blue else c.label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (model.name != model.id) {
+                Text(model.id, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (selected) {
+            Spacer(Modifier.width(10.dp))
+            Icon(Icons.Rounded.Check, null, tint = c.blue)
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(0.5.dp).background(c.separator))
 }
