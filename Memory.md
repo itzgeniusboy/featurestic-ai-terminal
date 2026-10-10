@@ -34,6 +34,9 @@
 - 2026-10-11: Fixes — SettingsScreen provider switch could not reassign `val providerId` → now saves via `prefs.saveProviderId`; Dashboard refresh button now calls suspend `fetchStats` inside `scope.launch`. CI-verified: run 38083945565 SUCCESS.
 - APK rebuilt + copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-debug.apk` (20.3 MB).
 - 2026-10-11: Bumped versionCode 1→2, versionName 1.0→1.1. CI run 38084421178 SUCCESS. APK copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-v1.1-debug.apk`.
+- 2026-10-11: SettingsScreen big rewrite — multi-provider API-key cards (ProviderKeyCard), one-click "Connect & load models" (fetches all providers with keys via coroutine async/awaitAll), full-screen grouped ModelPickerDialog with search; removed temperature + Termux-proxy sections. CI 38085613438 SUCCESS.
+- 2026-10-11: Removed Processes entirely (ChatScreen 3-dot menu item + `onNavigateToProcesses` param, `MainActivity` `composable("processes")` route + import, deleted `ProcessManagerScreen.kt`). Removed temperature fully (AppPreferences flow/key/save, ChatViewModel collector, LlmClient field + payload key). Welcome (EmptyChatState) now shows the real launcher icon (`R.drawable.ic_launcher`) instead of the AutoAwesome glyph. CI 38086582177 SUCCESS.
+- 2026-10-11: Added chat attachments. `ChatMessage` gained `imageBase64/imageMime/fileName` (nullable, Gson-safe). `LlmClient` sends OpenAI vision content-array (`image_url` data URL) or Ollama native `images[]`. ChatInputBar has a paperclip (`GetContent` picker): images → `viewModel.setAttachment(name, mime, b64)`, other files → `attachTextFile` appended to `selectedFileContext`. Pending-attachment preview chip + MessageBubble renders the image. CI 38086989834 SUCCESS. APK copied to `/storage/emulated/0/Download/Featurestic-AI-Terminal-v1.1-debug.apk` (20.3 MB).
 
 ## Next Steps
 - Optional: test each provider's live free-model fetch on-device.
