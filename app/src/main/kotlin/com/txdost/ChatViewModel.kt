@@ -46,7 +46,11 @@ data class ChatUiState(
     // ── Tool Test ────────────────────────────────────────────
     val toolTestStage: ToolTestStage = ToolTestStage.IDLE,
     val activeToolTest: ActiveToolTest? = null,
-    val providerId: String = ProviderRegistry.default.id
+    val providerId: String = ProviderRegistry.default.id,
+    // ── Pending attachment (photo/file to send) ──────────────
+    val pendingImageBase64: String? = null,
+    val pendingImageMime: String? = null,
+    val pendingFileName: String? = null
 )
 
 // Debug log entry
@@ -277,7 +281,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Send a message ───────────────────────────────────────
     fun sendMessage(text: String) {
-        if (text.isBlank() || _uiState.value.isGenerating) return
+        val hasAttachment = !_uiState.value.pendingImageBase64.isNullOrBlank()
+        if ((text.isBlank() && !hasAttachment) || _uiState.value.isGenerating) return
 
         // ── Tool test state machine intercept ────────────────
         val stage = _uiState.value.toolTestStage
@@ -324,7 +329,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         // ── Normal message flow ──────────────────────────────
 
-        val userMsg = ChatMessage("user", text.trim())
+        val pending = _uiState.value
+        val userMsg = ChatMessage(
+            role = "user",
+            content = text.trim(),
+            imageBase64 = pending.pendingImageBase64,
+            imageMime = pending.pendingImageMime,
+            fileName = pending.pendingFileName
+        )
         val updatedMessages = _uiState.value.messages + userMsg
 
         _uiState.update {
@@ -333,7 +345,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 currentInput = "",
                 isGenerating = true,
                 streamingText = "",
-                error = null
+                error = null,
+                pendingImageBase64 = null,
+                pendingImageMime = null,
+                pendingFileName = null
             )
         }
 
@@ -1454,6 +1469,18 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
     fun setFileContext(ctx: String) { _uiState.update { it.copy(selectedFileContext = ctx) } }
     fun clearFileContext() { _uiState.update { it.copy(selectedFileContext = "") } }
     fun openTermux() { termuxBridge.openTermux() }
+
+    // ── Chat attachments ─────────────────────────────────────
+    fun setAttachment(name: String, mime: String, base64: String) =
+        _uiState.update { it.copy(pendingFileName = name, pendingImageMime = mime, pendingImageBase64 = base64) }
+
+    fun clearAttachment() =
+        _uiState.update { it.copy(pendingFileName = null, pendingImageMime = null, pendingImageBase64 = null) }
+
+    fun attachTextFile(name: String, content: String) {
+        val snippet = "### File: $name\n```\n${content.take(20000)}\n```"
+        _uiState.update { it.copy(selectedFileContext = (it.selectedFileContext + "\n\n" + snippet).trim()) }
+    }
 
     // Tool test cancel (agar zaroorat pade)
     fun cancelToolTest() {

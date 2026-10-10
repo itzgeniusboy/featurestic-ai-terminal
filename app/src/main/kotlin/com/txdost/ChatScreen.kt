@@ -1,5 +1,9 @@
 package com.txdost.ui.screens
 
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -13,6 +17,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -44,9 +49,31 @@ fun ChatScreen(
     val uiState by chatViewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     var showClearDialog by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
     val c = Apple.colors
+
+    val attachLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val resolver = context.contentResolver
+                val mime = resolver.getType(uri) ?: "application/octet-stream"
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null) {
+                    if (mime.startsWith("image/")) {
+                        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        chatViewModel.setAttachment(name, mime, b64)
+                    } else {
+                        chatViewModel.attachTextFile(name, String(bytes, Charsets.UTF_8))
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+    }
 
     val totalItems = uiState.messages.size + if (uiState.streamingText.isNotEmpty()) 1 else 0
 
@@ -119,7 +146,11 @@ fun ChatScreen(
                 onSend = { chatViewModel.sendMessage(uiState.currentInput) },
                 onStop = { chatViewModel.stopCurrentTask() },
                 isGenerating = uiState.isGenerating,
-                enabled = uiState.ollamaOnline
+                enabled = uiState.ollamaOnline,
+                attachmentName = uiState.pendingFileName,
+                attachmentIsImage = !uiState.pendingImageBase64.isNullOrBlank(),
+                onAttach = { attachLauncher.launch("*/*") },
+                onRemoveAttachment = { chatViewModel.clearAttachment() }
             )
         }
 
@@ -319,10 +350,33 @@ private fun MessageBubble(message: ChatMessage, isStreaming: Boolean = false) {
                     .background(if (isUser) c.userBubble else c.aiBubble)
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                FormattedMessage(
-                    text = message.content + if (isStreaming) " ▌" else "",
-                    isUser = isUser
-                )
+                Column {
+                    if (!message.imageBase64.isNullOrBlank()) {
+                        val bmp = remember(message.imageBase64) {
+                            try {
+                                val bytes = Base64.decode(message.imageBase64, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            } catch (_: Exception) { null }
+                        }
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = message.fileName,
+                                modifier = Modifier
+                                    .widthIn(max = 220.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                            )
+                            if (message.content.isNotBlank())
+                                Spacer(Modifier.height(6.dp))
+                        }
+                    }
+                    if (message.content.isNotBlank()) {
+                        FormattedMessage(
+                            text = message.content + if (isStreaming) " ▌" else "",
+                            isUser = isUser
+                        )
+                    }
+                }
             }
         }
     }
@@ -586,17 +640,56 @@ private fun ChatInputBar(
     onSend: () -> Unit,
     onStop: () -> Unit,
     isGenerating: Boolean,
-    enabled: Boolean
+    enabled: Boolean,
+    attachmentName: String? = null,
+    attachmentIsImage: Boolean = false,
+    onAttach: () -> Unit = {},
+    onRemoveAttachment: () -> Unit = {}
 ) {
     val c = Apple.colors
     Surface(color = c.bg, shadowElevation = 8.dp) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        if (attachmentName != null) {
+            Row(
+                Modifier
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(c.secondaryBg)
+                    .padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    if (attachmentIsImage) Icons.Rounded.Image else Icons.Rounded.InsertDriveFile,
+                    null, tint = c.blue, modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    attachmentName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.label,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                IconButton(onClick = onRemoveAttachment, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Rounded.Close, "Remove", tint = c.secondaryLabel, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
         Row(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Bottom
         ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(c.secondaryBg)
+                    .clickable(enabled = enabled && !isGenerating) { onAttach() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.AttachFile, "Attach", tint = if (enabled) c.blue else c.tertiaryLabel, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(8.dp))
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -620,7 +713,7 @@ private fun ChatInputBar(
                 )
             )
             Spacer(Modifier.width(8.dp))
-            val canSend = value.isNotBlank() && enabled && !isGenerating
+            val canSend = (value.isNotBlank() || attachmentName != null) && enabled && !isGenerating
             Box(
                 Modifier
                     .size(40.dp)
@@ -642,6 +735,7 @@ private fun ChatInputBar(
                     modifier = Modifier.size(20.dp)
                 )
             }
+        }
         }
     }
 }

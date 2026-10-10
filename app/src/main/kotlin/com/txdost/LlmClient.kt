@@ -17,7 +17,10 @@ import java.util.concurrent.TimeUnit
 data class ChatMessage(
     val role: String,
     val content: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val imageBase64: String? = null,
+    val imageMime: String? = null,
+    val fileName: String? = null
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -88,8 +91,20 @@ class LlmClient {
             if (sys.isNotBlank()) {
                 arr.put(JSONObject().put("role", "system").put("content", sys))
             }
-            messages.forEach {
-                arr.put(JSONObject().put("role", it.role).put("content", it.content))
+            messages.forEach { m ->
+                if (m.imageBase64.isNullOrBlank()) {
+                    arr.put(JSONObject().put("role", m.role).put("content", m.content))
+                } else {
+                    val parts = JSONArray()
+                    if (m.content.isNotBlank())
+                        parts.put(JSONObject().put("type", "text").put("text", m.content))
+                    val dataUrl = "data:${m.imageMime ?: "image/jpeg"};base64,${m.imageBase64}"
+                    parts.put(
+                        JSONObject().put("type", "image_url")
+                            .put("image_url", JSONObject().put("url", dataUrl))
+                    )
+                    arr.put(JSONObject().put("role", m.role).put("content", parts))
+                }
             }
             put("messages", arr)
         }.toString()
@@ -163,7 +178,12 @@ class LlmClient {
             val arr = JSONArray()
             val sys = buildSystem(systemPrompt, fileContext)
             if (sys.isNotBlank()) arr.put(JSONObject().put("role", "system").put("content", sys))
-            messages.forEach { arr.put(JSONObject().put("role", it.role).put("content", it.content)) }
+            messages.forEach { m ->
+                val o = JSONObject().put("role", m.role).put("content", m.content)
+                if (!m.imageBase64.isNullOrBlank())
+                    o.put("images", JSONArray().put(m.imageBase64))
+                arr.put(o)
+            }
             put("messages", arr)
         }.toString()
 
