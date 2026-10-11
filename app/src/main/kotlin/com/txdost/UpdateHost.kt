@@ -45,6 +45,7 @@ private sealed interface UpdateStatus {
     data class Available(val info: UpdateInfo) : UpdateStatus
     data class ReadyToDownload(val info: UpdateInfo) : UpdateStatus
     data class Downloading(val info: UpdateInfo, val progress: Int) : UpdateStatus
+    data class ReadyToInstall(val info: UpdateInfo, val apk: File) : UpdateStatus
     data class NeedPermission(val info: UpdateInfo, val apk: File) : UpdateStatus
     data class SignatureMismatch(val info: UpdateInfo, val savedName: String?) : UpdateStatus
     data class Failed(val info: UpdateInfo?, val message: String) : UpdateStatus
@@ -84,15 +85,25 @@ fun UpdateHost(content: @Composable () -> Unit) {
                 if (mismatch) {
                     val saved = withContext(Dispatchers.IO) { exportApkToDownloads(context, file) }
                     status = UpdateStatus.SignatureMismatch(info, saved)
-                } else if (canInstall(context)) {
-                    installApk(context, file)
-                    status = UpdateStatus.Open
                 } else {
-                    status = UpdateStatus.NeedPermission(info, file)
+                    status = UpdateStatus.ReadyToInstall(info, file)
                 }
             } catch (e: Exception) {
                 status = UpdateStatus.Failed(info, e.message ?: "Download fail")
             }
+        }
+    }
+
+    fun installNow(info: UpdateInfo, apk: File) {
+        if (canInstall(context)) {
+            try {
+                installApk(context, apk)
+                status = UpdateStatus.Open
+            } catch (e: Exception) {
+                status = UpdateStatus.Failed(info, e.message ?: "Install fail")
+            }
+        } else {
+            status = UpdateStatus.NeedPermission(info, apk)
         }
     }
 
@@ -114,7 +125,7 @@ fun UpdateHost(content: @Composable () -> Unit) {
 
         is UpdateStatus.ReadyToDownload -> UpdateGate(
             title = "Update ready",
-            message = "Version ${s.info.versionName} download karo, phir auto install ho jayega.",
+            message = "Version ${s.info.versionName} download karo, phir \"Update karo\" dabao.",
             buttonText = "Download",
             onButton = { startDownload(s.info) }
         )
@@ -125,21 +136,20 @@ fun UpdateHost(content: @Composable () -> Unit) {
             progress = s.progress
         )
 
+        is UpdateStatus.ReadyToInstall -> UpdateGate(
+            title = "Download ho gaya",
+            message = "Version ${s.info.versionName} taiyar hai. \"Update karo\" dabao — naya version install ho jayega.",
+            buttonText = "Update karo",
+            onButton = { installNow(s.info, s.apk) }
+        )
+
         is UpdateStatus.NeedPermission -> UpdateGate(
             title = "Install permission chahiye",
-            message = "Is app ko update install karne ki permission do, phir \"Install karo\" dabao.",
-            buttonText = "Install karo",
+            message = "Is app ko update install karne ki permission do, phir \"Update karo\" dabao.",
+            buttonText = "Update karo",
             onButton = {
-                if (canInstall(context)) {
-                    try {
-                        installApk(context, s.apk)
-                        status = UpdateStatus.Open
-                    } catch (e: Exception) {
-                        status = UpdateStatus.Failed(s.info, e.message ?: "Install fail")
-                    }
-                } else {
-                    requestInstallPermission(context)
-                }
+                if (canInstall(context)) installNow(s.info, s.apk)
+                else requestInstallPermission(context)
             }
         )
 
