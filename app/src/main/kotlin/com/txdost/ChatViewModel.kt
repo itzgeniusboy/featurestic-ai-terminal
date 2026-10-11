@@ -419,12 +419,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 activeProcs.joinToString("\n") { "- ${it.name} (id:${it.id}, log:${it.logFile})" }
             } else "None"
 
-            // ── OpenCode Zen without a key → official opencode CLI ──
-            // With an app API key the direct HTTP path works (Zen's key channel is
-            // independent of the client-fingerprint free-tier gate), so only fall
-            // back to the CLI when no key is set.
+            // ── OpenCode Zen free models → official opencode CLI ──
+            // Zen's free models (big-pickle, *-free) only work from the official
+            // OpenCode client, even with a key. So route free models (and any
+            // keyless Zen request) through the real CLI in Termux. Paid Zen models
+            // with a key still use the direct HTTP path.
+            val zenModel = prefs.modelFor("opencode").first()
+            val zenFree = zenModel.equals("big-pickle", true) || zenModel.contains("-free", true)
             if (prefs.providerId.first() == "opencode" &&
-                prefs.apiKeyFor("opencode").first().isBlank() &&
+                (prefs.apiKeyFor("opencode").first().isBlank() || zenFree) &&
                 _uiState.value.agentMode != "plan"
             ) {
                 handleOpencodeCliChat(updatedMessages, termuxLive)
@@ -923,7 +926,13 @@ Now answer the user based on these ACTUAL real-time results.
 
         val raw = termuxBridge
             .runCommandAndGetOutput("tail -n 300 ~/opencode_chat.log 2>/dev/null").output
-        val answer = cleanTags(raw).ifBlank { "(koi output nahi aaya)" }
+        val answer = when {
+            raw.contains("FreeTierError") || raw.contains("free tier can only be used") ->
+                "opencode CLI ne free tier reject kar diya — iska matlab CLI official release nahi hai. " +
+                    "Settings > External agent > Install (opencode) dobara chalao (ye official package + upgrade " +
+                    "karta hai), phir message dobara bhejo."
+            else -> cleanTags(raw).ifBlank { "(koi output nahi aaya)" }
+        }
         val finalMsgs = _uiState.value.messages + ChatMessage("assistant", answer)
         _uiState.update { it.copy(messages = finalMsgs, isGenerating = false, streamingText = "") }
         txService?.setGenerating(false)

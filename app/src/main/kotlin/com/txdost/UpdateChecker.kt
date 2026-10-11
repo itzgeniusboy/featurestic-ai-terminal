@@ -49,7 +49,12 @@ object UpdateChecker {
     }
 
     /** Download the APK into cache/updates/ and return the file (checksum verified). */
-    fun download(context: Context, url: String, expectedSha256: String?): File {
+    fun download(
+        context: Context,
+        url: String,
+        expectedSha256: String?,
+        onProgress: ((Int) -> Unit)? = null
+    ): File {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         val dest = File(dir, "update.apk")
         if (dest.exists()) dest.delete()
@@ -59,7 +64,24 @@ object UpdateChecker {
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", "FeaturesticUpdater")
         }
-        conn.inputStream.use { input -> dest.outputStream().use { input.copyTo(it) } }
+        val total = conn.contentLengthLong
+        conn.inputStream.use { input ->
+            dest.outputStream().use { output ->
+                val buf = ByteArray(8192)
+                var read = 0L
+                var lastPct = -1
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    output.write(buf, 0, n)
+                    read += n
+                    if (total > 0) {
+                        val pct = (read * 100 / total).toInt().coerceIn(0, 100)
+                        if (pct != lastPct) { lastPct = pct; onProgress?.invoke(pct) }
+                    }
+                }
+            }
+        }
         if (!expectedSha256.isNullOrBlank()) {
             val actual = sha256(dest)
             if (!actual.equals(expectedSha256, ignoreCase = true)) {

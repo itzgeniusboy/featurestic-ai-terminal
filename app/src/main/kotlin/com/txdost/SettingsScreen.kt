@@ -228,8 +228,10 @@ fun SettingsScreen(
             extBusy = true
             extLog = "Installing nodejs (may take a few minutes)..."
             bridge.installPackage("nodejs")
-            extLog = "Installing opencode-termux via npm..."
-            bridge.runCommandAndGetOutput("npm install -g opencode-termux", 600)
+            extLog = "Installing the official opencode CLI via npm..."
+            bridge.runCommandAndGetOutput("npm install -g opencode-ai@latest", 600)
+            extLog = "Ensuring latest official release (opencode upgrade)..."
+            bridge.runCommandAndGetOutput("opencode upgrade 2>&1 | tail -5", 300)
             val r = bridge.runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NO")
             extInstalled = r.output.contains("/opencode")
             extLog = if (extInstalled == true) "Installed" else "Install finished — not detected yet. Try Check."
@@ -375,7 +377,7 @@ fun SettingsScreen(
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "opencode",
+                        "opencode (official CLI)",
                         style = MaterialTheme.typography.bodyLarge,
                         color = c.label,
                         modifier = Modifier.weight(1f)
@@ -389,8 +391,9 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Bade tasks (poori app banane + build) ke liye app ek full coding agent " +
-                        "ko Termux me chalata hai. Aapki wahi API key use hoti hai — alag key nahi chahiye.",
+                    "Zen ke free models (jaise big-pickle) aur bade tasks isi official " +
+                        "opencode agent se Termux me chalte hain — yahi legit raasta hai. " +
+                        "Install par tap karke ek baar set ho jayega.",
                     style = MaterialTheme.typography.labelSmall,
                     color = c.secondaryLabel
                 )

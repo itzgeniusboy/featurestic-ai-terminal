@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,25 +34,59 @@ import java.io.File
 private sealed interface UpdateStatus {
     data object Checking : UpdateStatus
     data object Open : UpdateStatus
-    data class Required(val info: UpdateInfo) : UpdateStatus
-    data class Downloading(val info: UpdateInfo) : UpdateStatus
+    data class Available(val info: UpdateInfo) : UpdateStatus
+    data class ReadyToDownload(val info: UpdateInfo) : UpdateStatus
+    data class Downloading(val info: UpdateInfo, val progress: Int) : UpdateStatus
+    data class NeedPermission(val info: UpdateInfo) : UpdateStatus
     data class Failed(val info: UpdateInfo?, val message: String) : UpdateStatus
 }
 
 /**
- * Blocking update gate. App khulte hi check hota hai; naya version mile to
- * normal UI ki jagah "Update" screen dikhti hai. Net na ho / check fail ho to
- * app normal khul jata hai (brick nahi hota).
+ * Update gate with a smooth, staged flow:
+ *   Update available  →  Download  →  (download with progress)  →  install.
+ * Net na ho / check fail ho to app normal khul jata hai.
  */
 @Composable
 fun UpdateHost(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Checking) }
+    var pendingFile by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(Unit) {
         val info = withContext(Dispatchers.IO) { UpdateChecker.check() }
-        status = if (info != null) UpdateStatus.Required(info) else UpdateStatus.Open
+        status = if (info != null) UpdateStatus.Available(info) else UpdateStatus.Open
+    }
+
+    fun installReady(file: File) {
+        if (canInstall(context)) {
+            startInstaller(context, file)
+            status = UpdateStatus.Open
+        } else {
+            requestInstallPermission(context)
+        }
+    }
+
+    fun startDownload(info: UpdateInfo) {
+        status = UpdateStatus.Downloading(info, 0)
+        scope.launch {
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    UpdateChecker.download(context, info.apkUrl, info.sha256) { pct ->
+                        status = UpdateStatus.Downloading(info, pct)
+                    }
+                }
+                pendingFile = file
+                if (canInstall(context)) {
+                    startInstaller(context, file)
+                    status = UpdateStatus.Open
+                } else {
+                    status = UpdateStatus.NeedPermission(info)
+                }
+            } catch (e: Exception) {
+                status = UpdateStatus.Failed(info, e.message ?: "Download fail")
+            }
+        }
     }
 
     when (val s = status) {
@@ -62,30 +98,35 @@ fun UpdateHost(content: @Composable () -> Unit) {
             showSpinner = true
         )
 
-        is UpdateStatus.Required -> UpdateGate(
-            title = "Update zaroori hai",
-            message = "Naya version ${s.info.versionName} aa gaya hai. App use karne ke liye pehle update karo.",
-            buttonText = "Update karo",
-            onButton = {
-                status = UpdateStatus.Downloading(s.info)
-                scope.launch {
-                    try {
-                        val file = withContext(Dispatchers.IO) {
-                            UpdateChecker.download(context, s.info.apkUrl, s.info.sha256)
-                        }
-                        installApk(context, file)
-                        status = UpdateStatus.Open
-                    } catch (e: Exception) {
-                        status = UpdateStatus.Failed(s.info, e.message ?: "Download fail")
-                    }
-                }
-            }
+        is UpdateStatus.Available -> UpdateGate(
+            title = "Update available",
+            message = "Naya version ${s.info.versionName} taiyar hai.",
+            buttonText = "Update available",
+            onButton = { status = UpdateStatus.ReadyToDownload(s.info) }
+        )
+
+        is UpdateStatus.ReadyToDownload -> UpdateGate(
+            title = "Update ready",
+            message = "Version ${s.info.versionName} download karo, phir auto install ho jayega.",
+            buttonText = "Download",
+            onButton = { startDownload(s.info) }
         )
 
         is UpdateStatus.Downloading -> UpdateGate(
             title = "Download ho raha hai...",
-            message = "Ruko, update download karke installer kholenge.",
-            showSpinner = true
+            message = "${s.progress}%",
+            progress = s.progress
+        )
+
+        is UpdateStatus.NeedPermission -> UpdateGate(
+            title = "Install permission chahiye",
+            message = "Is app ko update install karne ki permission do, phir \"Install karo\" dabao.",
+            buttonText = "Install karo",
+            onButton = {
+                val f = pendingFile
+                if (f != null && canInstall(context)) installReady(f)
+                else requestInstallPermission(context)
+            }
         )
 
         is UpdateStatus.Failed -> UpdateGate(
@@ -93,7 +134,7 @@ fun UpdateHost(content: @Composable () -> Unit) {
             message = s.message,
             buttonText = if (s.info != null) "Dobara try karo" else "Aage badho",
             onButton = {
-                status = if (s.info != null) UpdateStatus.Required(s.info) else UpdateStatus.Open
+                status = if (s.info != null) UpdateStatus.ReadyToDownload(s.info) else UpdateStatus.Open
             }
         )
     }
@@ -104,6 +145,7 @@ private fun UpdateGate(
     title: String,
     message: String,
     showSpinner: Boolean = false,
+    progress: Int? = null,
     buttonText: String? = null,
     onButton: (() -> Unit)? = null
 ) {
@@ -126,7 +168,13 @@ private fun UpdateGate(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (showSpinner) {
+            if (progress != null) {
+                Spacer(Modifier.height(24.dp))
+                LinearProgressIndicator(
+                    progress = { progress / 100f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (showSpinner) {
                 Spacer(Modifier.height(24.dp))
                 CircularProgressIndicator()
             }
@@ -138,17 +186,18 @@ private fun UpdateGate(
     }
 }
 
-private fun installApk(context: Context, file: File) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-        !context.packageManager.canRequestPackageInstalls()
-    ) {
-        context.startActivity(
-            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
-                .setData(Uri.parse("package:${context.packageName}"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-        return
-    }
+private fun canInstall(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+private fun requestInstallPermission(context: Context) {
+    context.startActivity(
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+            .setData(Uri.parse("package:${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}
+
+private fun startInstaller(context: Context, file: File) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(uri, "application/vnd.android.package-archive")
