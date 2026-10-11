@@ -12,8 +12,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Search
@@ -66,9 +68,11 @@ fun SettingsScreen(
     val prefs = remember { AppPreferences(app) }
     val scope = rememberCoroutineScope()
 
-    val keys = remember { mutableStateMapOf<String, String>() }
+    val keys = remember { mutableStateMapOf<String, List<String>>() }
     LaunchedEffect(Unit) {
-        ProviderRegistry.all.forEach { spec -> keys[spec.id] = prefs.apiKeyFor(spec.id).first() }
+        ProviderRegistry.all.forEach { spec ->
+            keys[spec.id] = prefs.apiKeysFor(spec.id).first().ifEmpty { listOf("") }
+        }
     }
 
     val providerId by remember { prefs.providerId }.collectAsState(initial = ProviderRegistry.default.id)
@@ -80,6 +84,7 @@ fun SettingsScreen(
     val firecrawlStored by remember { prefs.firecrawlApiKey }.collectAsState(initial = "")
     val themeStored by remember { prefs.themeMode }.collectAsState(initial = "system")
     val showCommandsStored by remember { prefs.showCommands }.collectAsState(initial = true)
+    val autoRotateStored by remember { prefs.autoRotateKeys }.collectAsState(initial = false)
 
     var systemPrompt by remember { mutableStateOf("") }
     var searchProvider by remember { mutableStateOf("DUCKDUCKGO") }
@@ -126,14 +131,20 @@ fun SettingsScreen(
     fun connect() {
         isLoading = true
         status = "Connecting…"
-        val snapshot = ProviderRegistry.all.associateWith { keys[it.id].orEmpty().trim() }
+        val snapshot = ProviderRegistry.all.associateWith { spec ->
+            keys[spec.id].orEmpty().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        }
         scope.launch {
-            snapshot.forEach { (spec, key) -> if (key.isNotEmpty()) prefs.saveApiKeyFor(spec.id, key) }
+            snapshot.forEach { (spec, ks) -> if (ks.isNotEmpty()) prefs.saveApiKeysFor(spec.id, ks) }
             val results = coroutineScope {
-                snapshot.map { (spec, key) ->
+                snapshot.map { (spec, ks) ->
                     async {
-                        if (key.isBlank()) spec.id to emptyList<ModelInfo>()
-                        else spec.id to LlmClient().getModels(spec, key).getOrDefault(emptyList())
+                        var list: List<ModelInfo> = emptyList()
+                        for (k in ks) {
+                            list = LlmClient().getModels(spec, k).getOrDefault(emptyList())
+                            if (list.isNotEmpty()) break
+                        }
+                        spec.id to list
                     }
                 }.awaitAll()
             }
@@ -149,13 +160,17 @@ fun SettingsScreen(
     }
 
     fun connectOne(spec: ProviderSpec) {
-        val key = keys[spec.id].orEmpty().trim()
-        if (key.isBlank()) { providerStatus[spec.id] = "Enter a key first"; return }
+        val ks = keys[spec.id].orEmpty().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (ks.isEmpty()) { providerStatus[spec.id] = "Enter a key first"; return }
         loadingId = spec.id
         providerStatus[spec.id] = "Connecting…"
         scope.launch {
-            prefs.saveApiKeyFor(spec.id, key)
-            val list = LlmClient().getModels(spec, key).getOrDefault(emptyList())
+            prefs.saveApiKeysFor(spec.id, ks)
+            var list: List<ModelInfo> = emptyList()
+            for (k in ks) {
+                list = LlmClient().getModels(spec, k).getOrDefault(emptyList())
+                if (list.isNotEmpty()) break
+            }
             val map = modelsByProvider + (spec.id to list)
             modelsByProvider = map
             providerStatus[spec.id] = if (list.isEmpty()) "No free models (check key)" else "${list.size} free model(s)"
@@ -166,7 +181,7 @@ fun SettingsScreen(
 
     var autoTried by remember { mutableStateOf(false) }
     LaunchedEffect(keys.size) {
-        if (!autoTried && keys.values.any { it.isNotBlank() }) {
+        if (!autoTried && keys.values.any { list -> list.any { it.isNotBlank() } }) {
             autoTried = true
             connect()
         }
@@ -174,7 +189,10 @@ fun SettingsScreen(
 
     fun saveSettings() {
         scope.launch {
-            ProviderRegistry.all.forEach { spec -> prefs.saveApiKeyFor(spec.id, keys[spec.id].orEmpty().trim()) }
+            ProviderRegistry.all.forEach { spec ->
+                val ks = keys[spec.id].orEmpty().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                prefs.saveApiKeysFor(spec.id, ks)
+            }
             prefs.saveSystemPrompt(systemPrompt)
             prefs.saveWebSearchProvider(searchProvider)
             prefs.saveTavilyApiKey(tavilyKey.trim())
@@ -202,7 +220,9 @@ fun SettingsScreen(
                 val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                 prefs.importJson(text)
                 keys.clear()
-                ProviderRegistry.all.forEach { spec -> keys[spec.id] = prefs.apiKeyFor(spec.id).first() }
+                ProviderRegistry.all.forEach { spec ->
+                    keys[spec.id] = prefs.apiKeysFor(spec.id).first().ifEmpty { listOf("") }
+                }
                 status = "Imported"
             } catch (e: Exception) { status = "Import failed: ${e.message}" }
         }
@@ -276,10 +296,12 @@ fun SettingsScreen(
             ProviderRegistry.all.forEach { spec ->
                 ProviderKeyCard(
                     spec = spec,
-                    value = keys[spec.id].orEmpty(),
-                    onValueChange = {
-                        keys[spec.id] = it
-                        scope.launch { prefs.saveApiKeyFor(spec.id, it.trim()) }
+                    values = keys[spec.id].orEmpty().ifEmpty { listOf("") },
+                    onValuesChange = { list ->
+                        keys[spec.id] = list
+                        scope.launch {
+                            prefs.saveApiKeysFor(spec.id, list.map { it.trim() }.filter { it.isNotEmpty() }.distinct())
+                        }
                     },
                     isActive = spec.id == providerId,
                     status = providerStatus[spec.id],
@@ -306,11 +328,18 @@ fun SettingsScreen(
                     else "$activeProviderName · $activeModel",
                     icon = Icons.Rounded.Memory,
                     showChevron = true,
-                    showDivider = false,
+                    showDivider = true,
                     onClick = {
                         if (modelsByProvider.isEmpty()) connect()
                         showPicker = true
                     }
+                )
+                AppleSwitchRow(
+                    title = "Auto mode",
+                    subtitle = "Rotate API keys on every request — spreads load & beats rate limits",
+                    checked = autoRotateStored,
+                    onCheckedChange = { scope.launch { prefs.saveAutoRotateKeys(it) } },
+                    showDivider = false
                 )
             }
 
@@ -541,15 +570,16 @@ fun SettingsScreen(
 @Composable
 private fun ProviderKeyCard(
     spec: ProviderSpec,
-    value: String,
-    onValueChange: (String) -> Unit,
+    values: List<String>,
+    onValuesChange: (List<String>) -> Unit,
     isActive: Boolean,
     status: String? = null,
     isConnecting: Boolean = false,
     onConnect: () -> Unit = {}
 ) {
     val c = Apple.colors
-    var visible by remember { mutableStateOf(false) }
+    val shown = values.ifEmpty { listOf("") }
+    val visible = remember { mutableStateListOf<Boolean>() }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
         AppleCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -557,34 +587,71 @@ private fun ProviderKeyCard(
                 Spacer(Modifier.weight(1f))
                 if (isActive) AppleBadge("Active")
             }
-            Spacer(Modifier.height(8.dp))
-            AppleTextField(
-                value = value,
-                onValueChange = onValueChange,
-                placeholder = if (spec.keyHint.isNotBlank()) spec.keyHint else "Paste API key",
-                label = "API key",
-                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailing = {
-                    IconButton(onClick = { visible = !visible }) {
-                        Icon(if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null, tint = c.secondaryLabel)
+            shown.forEachIndexed { index, value ->
+                Spacer(Modifier.height(8.dp))
+                AppleTextField(
+                    value = value,
+                    onValueChange = { nv ->
+                        val list = shown.toMutableList()
+                        list[index] = nv
+                        onValuesChange(list)
+                    },
+                    placeholder = if (index == 0 && spec.keyHint.isNotBlank()) spec.keyHint
+                                  else "Paste API key${if (index > 0) " ${index + 1}" else ""}",
+                    label = if (index == 0) "API key" else "API key ${index + 1}",
+                    visualTransformation = if (visible.getOrElse(index) { false }) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = {
+                                while (visible.size <= index) visible.add(false)
+                                visible[index] = !visible[index]
+                            }) {
+                                Icon(
+                                    if (visible.getOrElse(index) { false }) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                    null, tint = c.secondaryLabel
+                                )
+                            }
+                            if (index > 0) {
+                                IconButton(onClick = {
+                                    val list = shown.toMutableList()
+                                    list.removeAt(index)
+                                    onValuesChange(list.ifEmpty { listOf("") })
+                                }) {
+                                    Icon(Icons.Rounded.Close, null, tint = c.secondaryLabel)
+                                }
+                            }
+                        }
                     }
-                }
-            )
-            if (value.isNotBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AppleButton(
-                        "Connect",
-                        onConnect,
-                        style = AppleButtonStyle.Tinted,
-                        icon = Icons.Rounded.Bolt,
-                        loading = isConnecting,
-                        enabled = !isConnecting
-                    )
-                    if (status != null) {
-                        Spacer(Modifier.width(10.dp))
-                        Text(status, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
-                    }
+                )
+            }
+            val anyValue = shown.any { it.isNotBlank() }
+            if (anyValue) {
+                Spacer(Modifier.height(12.dp))
+                AppleButton(
+                    "Connect",
+                    onConnect,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = AppleButtonStyle.Tinted,
+                    icon = Icons.Rounded.Bolt,
+                    loading = isConnecting,
+                    enabled = !isConnecting
+                )
+                Spacer(Modifier.height(8.dp))
+                AppleButton(
+                    "Add More APIs",
+                    {
+                        val list = shown.toMutableList()
+                        list.add("")
+                        onValuesChange(list)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    style = AppleButtonStyle.Plain,
+                    icon = Icons.Rounded.Add,
+                    enabled = !isConnecting
+                )
+                if (status != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(status, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
                 }
             } else if (status != null) {
                 Spacer(Modifier.height(6.dp))

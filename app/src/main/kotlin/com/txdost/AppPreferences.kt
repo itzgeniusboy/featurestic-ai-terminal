@@ -29,8 +29,10 @@ class AppPreferences(private val context: Context) {
         val SKILLS_JSON        = stringPreferencesKey("skills_json")
         val THEME_MODE         = stringPreferencesKey("theme_mode")
         val SHOW_COMMANDS      = booleanPreferencesKey("show_commands")
+        val AUTO_ROTATE_KEYS   = booleanPreferencesKey("auto_rotate_keys")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
+        private fun apiKeysKey(providerId: String) = stringPreferencesKey("api_keys_$providerId")
         private fun modelKey(providerId: String) = stringPreferencesKey("model_$providerId")
     }
 
@@ -38,7 +40,26 @@ class AppPreferences(private val context: Context) {
     val providerId: Flow<String> = context.dataStore.data.map { it[PROVIDER_ID] ?: ProviderRegistry.default.id }
 
     fun apiKeyFor(providerId: String): Flow<String> =
-        context.dataStore.data.map { it[apiKeyKey(providerId)] ?: "" }
+        context.dataStore.data.map { parseKeys(it[apiKeysKey(providerId)], it[apiKeyKey(providerId)]).firstOrNull() ?: "" }
+
+    /** All API keys for a provider (a provider can have multiple keys for load-spreading). */
+    fun apiKeysFor(providerId: String): Flow<List<String>> =
+        context.dataStore.data.map { parseKeys(it[apiKeysKey(providerId)], it[apiKeyKey(providerId)]) }
+
+    private fun parseKeys(json: String?, legacy: String?): List<String> {
+        val out = mutableListOf<String>()
+        if (!json.isNullOrBlank()) {
+            try {
+                val arr = org.json.JSONArray(json)
+                for (i in 0 until arr.length()) {
+                    val k = arr.optString(i).trim()
+                    if (k.isNotEmpty()) out.add(k)
+                }
+            } catch (_: Exception) { }
+        }
+        if (out.isEmpty() && !legacy.isNullOrBlank()) out.add(legacy.trim())
+        return out
+    }
 
     fun modelFor(providerId: String): Flow<String> =
         context.dataStore.data.map { it[modelKey(providerId)] ?: defaultModel(providerId) }
@@ -77,6 +98,7 @@ class AppPreferences(private val context: Context) {
     val skillsJson: Flow<String> = context.dataStore.data.map { it[SKILLS_JSON] ?: "" }
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
     val showCommands: Flow<Boolean> = context.dataStore.data.map { it[SHOW_COMMANDS] ?: true }
+    val autoRotateKeys: Flow<Boolean> = context.dataStore.data.map { it[AUTO_ROTATE_KEYS] ?: false }
 
     // ── Generation ───────────────────────────────────────────
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
@@ -88,7 +110,15 @@ class AppPreferences(private val context: Context) {
     // ── Saves ────────────────────────────────────────────────
     suspend fun saveProviderId(id: String) = context.dataStore.edit { it[PROVIDER_ID] = id }
     suspend fun saveApiKeyFor(providerId: String, key: String) =
-        context.dataStore.edit { it[apiKeyKey(providerId)] = key }
+        saveApiKeysFor(providerId, listOf(key))
+
+    suspend fun saveApiKeysFor(providerId: String, keys: List<String>) {
+        val cleaned = keys.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        context.dataStore.edit { e ->
+            e[apiKeysKey(providerId)] = org.json.JSONArray(cleaned).toString()
+            e[apiKeyKey(providerId)] = cleaned.firstOrNull() ?: ""
+        }
+    }
     suspend fun saveModelFor(providerId: String, model: String) =
         context.dataStore.edit { it[modelKey(providerId)] = model }
 
@@ -105,6 +135,7 @@ class AppPreferences(private val context: Context) {
     suspend fun saveSkills(json: String) = context.dataStore.edit { it[SKILLS_JSON] = json }
     suspend fun saveThemeMode(mode: String) = context.dataStore.edit { it[THEME_MODE] = mode }
     suspend fun saveShowCommands(enabled: Boolean) = context.dataStore.edit { it[SHOW_COMMANDS] = enabled }
+    suspend fun saveAutoRotateKeys(enabled: Boolean) = context.dataStore.edit { it[AUTO_ROTATE_KEYS] = enabled }
 
     /** Wipe every stored preference (keys, models, prompt, skills, catalog). */
     suspend fun clearAll() = context.dataStore.edit { it.clear() }
@@ -132,7 +163,9 @@ class AppPreferences(private val context: Context) {
         val providers = JSONObject()
         ProviderRegistry.all.forEach { spec ->
             providers.put(spec.id, JSONObject().apply {
-                put("apiKey", p[apiKeyKey(spec.id)] ?: "")
+                val ks = parseKeys(p[apiKeysKey(spec.id)], p[apiKeyKey(spec.id)])
+                put("apiKey", ks.firstOrNull() ?: "")
+                put("apiKeys", org.json.JSONArray(ks))
                 put("model", p[modelKey(spec.id)] ?: "")
             })
         }
@@ -162,8 +195,17 @@ class AppPreferences(private val context: Context) {
             if (prov != null) {
                 for (spec in ProviderRegistry.all) {
                     val o = prov.optJSONObject(spec.id) ?: continue
-                    val k = o.optString("apiKey", "")
-                    if (k.isNotEmpty()) e[apiKeyKey(spec.id)] = k
+                    val arr = o.optJSONArray("apiKeys")
+                    val ks = mutableListOf<String>()
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) arr.optString(i).trim().takeIf { it.isNotEmpty() }?.let { ks.add(it) }
+                    }
+                    if (ks.isEmpty()) o.optString("apiKey", "").trim().takeIf { it.isNotEmpty() }?.let { ks.add(it) }
+                    if (ks.isNotEmpty()) {
+                        val cleaned = ks.distinct()
+                        e[apiKeysKey(spec.id)] = org.json.JSONArray(cleaned).toString()
+                        e[apiKeyKey(spec.id)] = cleaned.first()
+                    }
                     val m = o.optString("model", "")
                     if (m.isNotEmpty()) e[modelKey(spec.id)] = m
                 }

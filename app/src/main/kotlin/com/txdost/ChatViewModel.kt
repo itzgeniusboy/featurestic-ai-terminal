@@ -92,6 +92,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var currentApiKey = ""
     private var currentSystemPrompt = ""
 
+    // Auto mode: har request pe provider ki keys round-robin rotate karo (load distribute + rate-limit bypass)
+    private val keyRotation = java.util.concurrent.atomic.AtomicInteger(0)
+
     // Current AI job — direct cancel ke liye ViewModel mein rakho
     private var currentAiJob: Job? = null
 
@@ -439,32 +442,46 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             var lastError: String? = null
             var usedProvider: String? = null
             var usedModel: String? = null
+            var usedKey: String? = null
+            val rotateKeysEnabled = prefs.autoRotateKeys.first()
+            val rotation = keyRotation.getAndIncrement()
             try {
                 withTimeout(90_000L) {
                     for (cand in candidates) {
                         val spec = ProviderRegistry.byId(cand.first)
-                        val key = prefs.apiKeyFor(cand.first).first()
-                        llm.provider = spec
-                        val localSb = StringBuilder()
-                        var localErr: String? = null
-                        llm.chatStream(
-                            apiKey = key,
-                            model = cand.second,
-                            messages = updatedMessages,
-                            systemPrompt = buildSystemPrompt(termuxLive, deviceInfo, procsInfo),
-                            fileContext = _uiState.value.selectedFileContext
-                        ).collect { token ->
-                            ensureActive()
-                            if (token.startsWith("[ERROR]")) localErr = token
-                            else localSb.append(token)
+                        val allKeys = prefs.apiKeysFor(cand.first).first()
+                        val orderedKeys = if (rotateKeysEnabled && allKeys.size > 1) {
+                            val off = ((rotation % allKeys.size) + allKeys.size) % allKeys.size
+                            allKeys.drop(off) + allKeys.take(off)
+                        } else allKeys
+                        val keysToTry = if (orderedKeys.isEmpty()) listOf("") else orderedKeys
+                        var gotResponse = false
+                        for (key in keysToTry) {
+                            llm.provider = spec
+                            val localSb = StringBuilder()
+                            var localErr: String? = null
+                            llm.chatStream(
+                                apiKey = key,
+                                model = cand.second,
+                                messages = updatedMessages,
+                                systemPrompt = buildSystemPrompt(termuxLive, deviceInfo, procsInfo),
+                                fileContext = _uiState.value.selectedFileContext
+                            ).collect { token ->
+                                ensureActive()
+                                if (token.startsWith("[ERROR]")) localErr = token
+                                else localSb.append(token)
+                            }
+                            if (localSb.isNotEmpty()) {
+                                sb.append(localSb)
+                                usedProvider = cand.first
+                                usedModel = cand.second
+                                usedKey = key
+                                gotResponse = true
+                                break
+                            }
+                            lastError = localErr ?: "empty response"
                         }
-                        if (localSb.isNotEmpty()) {
-                            sb.append(localSb)
-                            usedProvider = cand.first
-                            usedModel = cand.second
-                            break
-                        }
-                        lastError = localErr ?: "empty response"
+                        if (gotResponse) break
                     }
                 }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
@@ -493,7 +510,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val okProvider = usedProvider
             val okModel = usedModel
             if (okProvider != null && okModel != null) {
-                currentApiKey = prefs.apiKeyFor(okProvider).first()
+                currentApiKey = usedKey ?: prefs.apiKeyFor(okProvider).first()
                 currentModel = okModel
                 llm.provider = ProviderRegistry.byId(okProvider)
                 _uiState.update { it.copy(currentModel = okModel) }
