@@ -419,8 +419,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 activeProcs.joinToString("\n") { "- ${it.name} (id:${it.id}, log:${it.logFile})" }
             } else "None"
 
-            // ── OpenCode Zen → official opencode CLI (free tier is tied to the client) ──
-            if (prefs.providerId.first() == "opencode" && _uiState.value.agentMode != "plan") {
+            // ── OpenCode Zen without a key → official opencode CLI ──
+            // With an app API key the direct HTTP path works (Zen's key channel is
+            // independent of the client-fingerprint free-tier gate), so only fall
+            // back to the CLI when no key is set.
+            if (prefs.providerId.first() == "opencode" &&
+                prefs.apiKeyFor("opencode").first().isBlank() &&
+                _uiState.value.agentMode != "plan"
+            ) {
                 handleOpencodeCliChat(updatedMessages, termuxLive)
                 return@launch
             }
