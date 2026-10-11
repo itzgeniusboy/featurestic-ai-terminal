@@ -1,9 +1,14 @@
 package com.txdost
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.MessageDigest
 
 private sealed interface UpdateStatus {
     data object Checking : UpdateStatus
@@ -37,34 +43,26 @@ private sealed interface UpdateStatus {
     data class Available(val info: UpdateInfo) : UpdateStatus
     data class ReadyToDownload(val info: UpdateInfo) : UpdateStatus
     data class Downloading(val info: UpdateInfo, val progress: Int) : UpdateStatus
-    data class NeedPermission(val info: UpdateInfo) : UpdateStatus
+    data class NeedPermission(val info: UpdateInfo, val apk: File) : UpdateStatus
+    data class SignatureMismatch(val info: UpdateInfo, val savedName: String?) : UpdateStatus
     data class Failed(val info: UpdateInfo?, val message: String) : UpdateStatus
 }
 
 /**
  * Update gate with a smooth, staged flow:
  *   Update available  →  Download  →  (download with progress)  →  install.
- * Net na ho / check fail ho to app normal khul jata hai.
+ * Agar purani app alag signing key se install hui ho (jis se update install nahi hota),
+ * to wo detect karke APK Downloads me save karke uninstall + reinstall guide karta hai.
  */
 @Composable
 fun UpdateHost(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Checking) }
-    var pendingFile by remember { mutableStateOf<File?>(null) }
 
     LaunchedEffect(Unit) {
         val info = withContext(Dispatchers.IO) { UpdateChecker.check() }
         status = if (info != null) UpdateStatus.Available(info) else UpdateStatus.Open
-    }
-
-    fun installReady(file: File) {
-        if (canInstall(context)) {
-            startInstaller(context, file)
-            status = UpdateStatus.Open
-        } else {
-            requestInstallPermission(context)
-        }
     }
 
     fun startDownload(info: UpdateInfo) {
@@ -76,12 +74,19 @@ fun UpdateHost(content: @Composable () -> Unit) {
                         status = UpdateStatus.Downloading(info, pct)
                     }
                 }
-                pendingFile = file
-                if (canInstall(context)) {
+                // Signature check: agar purani installed app ka signer alag hai to
+                // ye APK uske upar install ho hi nahi sakta.
+                val mismatch = withContext(Dispatchers.IO) {
+                    signaturesDiffer(context, file)
+                }
+                if (mismatch) {
+                    val saved = withContext(Dispatchers.IO) { exportApkToDownloads(context, file) }
+                    status = UpdateStatus.SignatureMismatch(info, saved)
+                } else if (canInstall(context)) {
                     startInstaller(context, file)
                     status = UpdateStatus.Open
                 } else {
-                    status = UpdateStatus.NeedPermission(info)
+                    status = UpdateStatus.NeedPermission(info, file)
                 }
             } catch (e: Exception) {
                 status = UpdateStatus.Failed(info, e.message ?: "Download fail")
@@ -123,10 +128,27 @@ fun UpdateHost(content: @Composable () -> Unit) {
             message = "Is app ko update install karne ki permission do, phir \"Install karo\" dabao.",
             buttonText = "Install karo",
             onButton = {
-                val f = pendingFile
-                if (f != null && canInstall(context)) installReady(f)
-                else requestInstallPermission(context)
+                if (canInstall(context)) {
+                    try {
+                        startInstaller(context, s.apk)
+                        status = UpdateStatus.Open
+                    } catch (e: Exception) {
+                        status = UpdateStatus.Failed(s.info, e.message ?: "Install fail")
+                    }
+                } else {
+                    requestInstallPermission(context)
+                }
             }
+        )
+
+        is UpdateStatus.SignatureMismatch -> UpdateGate(
+            title = "Purani app se match nahi hua",
+            message = "Is update ko install nahi kiya ja sakta kyunki aapki purani app " +
+                "alag signing key se install hui hai.\n\n" +
+                (if (s.savedName != null) "Naya APK Downloads me save ho gaya: ${s.savedName}\n\n" else "") +
+                "Purani app uninstall karo, phir wahi naya APK (ya GitHub release) install karo.",
+            buttonText = "Purani app uninstall karo",
+            onButton = { uninstallSelf(context) }
         )
 
         is UpdateStatus.Failed -> UpdateGate(
@@ -205,4 +227,76 @@ private fun startInstaller(context: Context, file: File) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     context.startActivity(intent)
+}
+
+private fun uninstallSelf(context: Context) {
+    context.startActivity(
+        Intent(Intent.ACTION_DELETE, Uri.parse("package:${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}
+
+/** True if the installed app's signing certs are known AND differ from the APK's. */
+private fun signaturesDiffer(context: Context, apk: File): Boolean = try {
+    val installed = signerHashes(installedInfo(context))
+    val incoming = signerHashes(archiveInfo(context, apk))
+    installed.isNotEmpty() && incoming.isNotEmpty() && installed != incoming
+} catch (e: Exception) {
+    false
+}
+
+private fun installedInfo(context: Context): PackageInfo {
+    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES
+    else PackageManager.GET_SIGNATURES
+    return context.packageManager.getPackageInfo(context.packageName, flags)
+}
+
+private fun archiveInfo(context: Context, apk: File): PackageInfo? {
+    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES
+    else PackageManager.GET_SIGNATURES
+    return context.packageManager.getPackageArchiveInfo(apk.absolutePath, flags)
+}
+
+private fun signerHashes(info: PackageInfo?): Set<String> {
+    if (info == null) return emptySet()
+    val certs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        info.signingInfo?.apkContentsSigners
+    } else {
+        @Suppress("DEPRECATION") info.signatures
+    }
+    return (certs ?: emptyArray()).map { sig ->
+        MessageDigest.getInstance("SHA-256").digest(sig.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }.toSet()
+}
+
+/** Copies the APK to the public Downloads folder; returns the file name, or null on failure. */
+private fun exportApkToDownloads(context: Context, file: File): String? = try {
+    val name = "Featurestic-AI-Terminal-v${BuildConfig.VERSION_NAME}.apk"
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, "application/vnd.android.package-archive")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            }
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            name
+        } else null
+    } else {
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!dir.exists()) dir.mkdirs()
+        val dest = File(dir, name)
+        file.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+        name
+    }
+} catch (e: Exception) {
+    null
 }
