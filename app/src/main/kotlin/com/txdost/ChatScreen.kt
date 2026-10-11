@@ -20,11 +20,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,6 +35,9 @@ import androidx.compose.ui.unit.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.txdost.R
 import com.txdost.TextUtils
+import com.txdost.MarkdownBlocks
+import com.txdost.MdBlock
+import com.txdost.MdType
 import com.txdost.data.ChatMessage
 import com.txdost.data.Conversation
 import com.txdost.ui.components.*
@@ -155,10 +160,12 @@ fun ChatScreen(
                     item { EmptyChatState(termuxConnected = uiState.termuxConnected) }
                 }
                 val lastAssistantIdx = uiState.messages.indexOfLast { it.role == "assistant" }
+                val bodySp = when (uiState.bodyTextSize) { "small" -> 14; "large" -> 18; else -> 16 }
                 itemsIndexed(uiState.messages) { idx, msg ->
                     MessageBubble(
                         message = msg,
                         chatViewModel = chatViewModel,
+                        textSizeSp = bodySp,
                         showCommands = uiState.showCommands,
                         onRegenerate = if (idx == lastAssistantIdx && !uiState.isGenerating)
                             ({ chatViewModel.regenerate() }) else null
@@ -344,6 +351,7 @@ private fun ErrorBanner(message: String) {
 private fun MessageBubble(
     message: ChatMessage,
     chatViewModel: ChatViewModel,
+    textSizeSp: Int = 16,
     showCommands: Boolean = true,
     onRegenerate: (() -> Unit)? = null
 ) {
@@ -375,7 +383,7 @@ private fun MessageBubble(
                         )
                     )
                     .background(if (isUser) c.userBubble else c.aiBubble)
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
                 Column {
                     if (!message.imageBase64.isNullOrBlank()) {
@@ -402,7 +410,8 @@ private fun MessageBubble(
                             text = message.content,
                             isUser = isUser,
                             chatViewModel = chatViewModel,
-                            showCommands = showCommands
+                            showCommands = showCommands,
+                            textSizeSp = textSizeSp
                         )
                     }
                 }
@@ -467,25 +476,110 @@ private fun FormattedMessage(
     text: String,
     isUser: Boolean,
     chatViewModel: ChatViewModel,
-    showCommands: Boolean
+    showCommands: Boolean,
+    textSizeSp: Int
 ) {
     val c = Apple.colors
-    val segments = parseMessageSegments(text)
     val bodyColor = if (isUser) Color.White else c.label
+    val blocks = remember(text) { MarkdownBlocks.parse(MarkdownBlocks.normalize(TextUtils.stripEmoji(text))) }
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(
+        fontSize = textSizeSp.sp,
+        lineHeight = (textSizeSp * 1.45f).sp
+    )
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        segments.forEach { segment ->
-            when (segment.type) {
-                SegmentType.CODE -> CodeBlock(segment)
-                SegmentType.COMMAND -> if (showCommands) CommandBlock(segment, isUser)
-                SegmentType.NORMAL -> if (segment.content.isNotBlank()) LinkText(segment.content, bodyColor)
+    SelectionContainer {
+        Column(Modifier.fillMaxWidth()) {
+            blocks.forEachIndexed { idx, block ->
+                val top = blockSpacing(if (idx == 0) null else blocks[idx - 1].type, block.type)
+                when (block.type) {
+                    MdType.CODE -> {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        CodeBlock(block, textSizeSp)
+                    }
+                    MdType.COMMAND -> if (showCommands) {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        CommandBlock(block, isUser)
+                    }
+                    MdType.HEADING -> {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        val size = when (block.level) {
+                            1 -> textSizeSp + 5
+                            2 -> textSizeSp + 2
+                            else -> textSizeSp + 1
+                        }
+                        Text(
+                            renderInlineMarkdownRaw(block.text, bodyColor),
+                            style = bodyStyle.copy(
+                                fontSize = size.sp,
+                                lineHeight = (size * 1.4f).sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    MdType.BULLET, MdType.NUMBERED -> {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        ListItemRow(block, bodyColor, bodyStyle)
+                    }
+                    MdType.QUOTE -> {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        QuoteBlock(block, bodyColor, bodyStyle)
+                    }
+                    MdType.DIVIDER -> {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        HorizontalDivider(color = c.separator, thickness = 0.5.dp)
+                    }
+                    MdType.PARAGRAPH -> {
+                        if (top > 0) Spacer(Modifier.height(top.dp))
+                        LinkText(block.text, bodyColor, bodyStyle)
+                    }
+                }
             }
         }
     }
 }
 
+/** Gap (dp) above the current block, based on the previous block type. */
+private fun blockSpacing(prev: MdType?, cur: MdType): Int = when {
+    prev == null -> 0
+    cur == MdType.HEADING -> 16
+    prev == MdType.HEADING -> 10
+    (cur == MdType.BULLET || cur == MdType.NUMBERED) &&
+        (prev == MdType.BULLET || prev == MdType.NUMBERED) -> 7
+    else -> 13
+}
+
 @Composable
-private fun CodeBlock(segment: MessageSegment) {
+private fun ListItemRow(block: MdBlock, color: Color, style: TextStyle) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(if (block.type == MdType.NUMBERED) 30.dp else 18.dp)) {
+            Text(
+                if (block.type == MdType.NUMBERED) "${block.level}." else "•",
+                style = style,
+                color = color
+            )
+        }
+        LinkText(block.text, color, style, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun QuoteBlock(block: MdBlock, color: Color, style: TextStyle) {
+    val c = Apple.colors
+    Row(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .width(3.dp)
+                .heightIn(min = 18.dp)
+                .background(c.tertiaryLabel, RoundedCornerShape(2.dp))
+        )
+        Spacer(Modifier.width(10.dp))
+        LinkText(block.text, color.copy(alpha = 0.85f), style.copy(fontStyle = FontStyle.Italic), Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun CodeBlock(block: MdBlock, textSizeSp: Int) {
     val c = Apple.colors
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
@@ -501,7 +595,7 @@ private fun CodeBlock(segment: MessageSegment) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                segment.language.ifEmpty { "code" },
+                block.language.ifEmpty { "code" },
                 style = MaterialTheme.typography.labelSmall,
                 color = c.secondaryLabel
             )
@@ -511,7 +605,7 @@ private fun CodeBlock(segment: MessageSegment) {
                 style = MaterialTheme.typography.labelSmall,
                 color = c.blue,
                 modifier = Modifier.clickable {
-                    copyToClipboard(context, segment.content)
+                    copyToClipboard(context, block.content)
                     copied = true
                 }
             )
@@ -519,17 +613,20 @@ private fun CodeBlock(segment: MessageSegment) {
         HorizontalDivider(color = c.separator, thickness = 0.5.dp)
         SelectionContainer {
             Text(
-                segment.content,
-                style = com.txdost.ui.theme.MonospaceStyle,
+                block.content,
+                style = com.txdost.ui.theme.MonospaceStyle.copy(fontSize = (textSizeSp - 3).coerceAtLeast(11).sp),
                 color = if (isSystemInDarkTheme()) Color(0xFFE5E5EA) else Color(0xFF1C1C1E),
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                softWrap = false,
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
             )
         }
     }
 }
 
 @Composable
-private fun CommandBlock(segment: MessageSegment, isUser: Boolean) {
+private fun CommandBlock(block: MdBlock, isUser: Boolean) {
     val c = Apple.colors
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
@@ -543,7 +640,7 @@ private fun CommandBlock(segment: MessageSegment, isUser: Boolean) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            segment.content,
+            block.content,
             style = com.txdost.ui.theme.MonospaceStyle,
             color = if (isUser) Color.White else c.label,
             modifier = Modifier.weight(1f)
@@ -553,13 +650,18 @@ private fun CommandBlock(segment: MessageSegment, isUser: Boolean) {
             Icons.Rounded.ContentCopy,
             "Copy",
             tint = if (isUser) Color.White.copy(alpha = 0.8f) else c.blue,
-            modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, segment.content); copied = true }
+            modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, block.content); copied = true }
         )
     }
 }
 
 @Composable
-private fun LinkText(text: String, baseColor: Color) {
+private fun LinkText(
+    text: String,
+    baseColor: Color,
+    style: TextStyle = MaterialTheme.typography.bodyLarge,
+    modifier: Modifier = Modifier
+) {
     val c = Apple.colors
     val urlRegex = remember { Regex("""(https?://[^\s\)\"<>]+)""") }
     val annotated = remember(text, baseColor) {
@@ -578,7 +680,7 @@ private fun LinkText(text: String, baseColor: Color) {
             append(renderInlineMarkdownRaw(text.substring(lastIndex), baseColor))
         }
     }
-    Text(annotated, style = MaterialTheme.typography.bodyLarge.copy(color = baseColor))
+    Text(annotated, style = style.copy(color = baseColor), modifier = modifier)
 }
 
 // ── Input status bar ─────────────────────────────────────────
@@ -1039,47 +1141,6 @@ fun ScheduleResearchDialog(
 private fun copyToClipboard(context: android.content.Context, text: String) {
     val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
     cm.setPrimaryClip(android.content.ClipData.newPlainText("featurestic", text))
-}
-
-enum class SegmentType { NORMAL, CODE, COMMAND }
-data class MessageSegment(val type: SegmentType, val content: String, val language: String = "")
-
-fun parseMessageSegments(text: String): List<MessageSegment> {
-    val segments = mutableListOf<MessageSegment>()
-    val lines = text.lines()
-    var i = 0
-    val currentNormal = StringBuilder()
-
-    fun flushNormal() {
-        val s = TextUtils.stripEmoji(currentNormal.toString()).trim()
-        if (s.isNotEmpty()) segments.add(MessageSegment(SegmentType.NORMAL, s))
-        currentNormal.clear()
-    }
-
-    while (i < lines.size) {
-        val line = lines[i]
-        when {
-            line.trimStart().startsWith("```") -> {
-                flushNormal()
-                val lang = line.trim().removePrefix("```").trim()
-                val codeLines = StringBuilder()
-                i++
-                while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
-                    codeLines.appendLine(lines[i]); i++
-                }
-                segments.add(MessageSegment(SegmentType.CODE, codeLines.toString().trimEnd(), lang))
-            }
-            line.contains("[TERMUX:") || line.trim().startsWith("$ ") -> {
-                flushNormal()
-                val cmd = line.replace(Regex("""\[TERMUX:(.*?)\]""")) { it.groupValues[1] }.trim()
-                segments.add(MessageSegment(SegmentType.COMMAND, cmd))
-            }
-            else -> currentNormal.appendLine(line)
-        }
-        i++
-    }
-    flushNormal()
-    return segments
 }
 
 fun renderInlineMarkdownRaw(text: String, baseColor: Color): androidx.compose.ui.text.AnnotatedString {

@@ -37,6 +37,10 @@ object SystemPrompts {
 ✓ Explain in ONE short plain line what you are doing. Show the exact command only when it helps.
 ✓ Write the final answer in plain language — no command dumps, no code fences, no tags.
 ✓ NEVER use emojis in your replies — plain text only (icons are shown by the app, not by you).
+✓ Format for easy reading: short paragraphs of 1-3 lines with a blank line between them.
+  Use bullet lists for options/steps, numbered lists for sequences, and put every command or
+  code in its own fenced block (```). Never write one big wall of text; never glue a list into a sentence.
+✓ Answer first, then details; end with at most ONE short follow-up question on its own line.
 """
 
         val skillsBlock = if (enabledSkills.isEmpty()) "" else

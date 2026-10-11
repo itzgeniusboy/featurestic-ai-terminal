@@ -85,6 +85,7 @@ fun SettingsScreen(
     val themeStored by remember { prefs.themeMode }.collectAsState(initial = "system")
     val showCommandsStored by remember { prefs.showCommands }.collectAsState(initial = true)
     val autoRotateStored by remember { prefs.autoRotateKeys }.collectAsState(initial = false)
+    val bodySizeStored by remember { prefs.bodyTextSize }.collectAsState(initial = "normal")
 
     var systemPrompt by remember { mutableStateOf("") }
     var searchProvider by remember { mutableStateOf("DUCKDUCKGO") }
@@ -458,6 +459,25 @@ fun SettingsScreen(
                 checked = showCommandsStored,
                 onCheckedChange = { scope.launch { prefs.saveShowCommands(it) } }
             )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Text size",
+                style = MaterialTheme.typography.labelMedium,
+                color = c.label,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(Modifier.height(6.dp))
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                AppleSegmentedControl(
+                    options = listOf("Small", "Normal", "Large"),
+                    selectedIndex = when (bodySizeStored) { "small" -> 0; "large" -> 2; else -> 1 },
+                    onSelect = { idx ->
+                        val v = when (idx) { 0 -> "small"; 2 -> "large"; else -> "normal" }
+                        scope.launch { prefs.saveBodyTextSize(v) }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             AppleSectionHeader("Appearance")
             Column(Modifier.padding(horizontal = 16.dp)) {

@@ -30,6 +30,7 @@ class AppPreferences(private val context: Context) {
         val THEME_MODE         = stringPreferencesKey("theme_mode")
         val SHOW_COMMANDS      = booleanPreferencesKey("show_commands")
         val AUTO_ROTATE_KEYS   = booleanPreferencesKey("auto_rotate_keys")
+        val BODY_TEXT_SIZE     = stringPreferencesKey("body_text_size")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
         private fun apiKeysKey(providerId: String) = stringPreferencesKey("api_keys_$providerId")
@@ -99,6 +100,8 @@ class AppPreferences(private val context: Context) {
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
     val showCommands: Flow<Boolean> = context.dataStore.data.map { it[SHOW_COMMANDS] ?: true }
     val autoRotateKeys: Flow<Boolean> = context.dataStore.data.map { it[AUTO_ROTATE_KEYS] ?: false }
+    /** Chat body text size: "small" | "normal" | "large". */
+    val bodyTextSize: Flow<String> = context.dataStore.data.map { it[BODY_TEXT_SIZE] ?: "normal" }
 
     // ── Generation ───────────────────────────────────────────
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
@@ -136,6 +139,7 @@ class AppPreferences(private val context: Context) {
     suspend fun saveThemeMode(mode: String) = context.dataStore.edit { it[THEME_MODE] = mode }
     suspend fun saveShowCommands(enabled: Boolean) = context.dataStore.edit { it[SHOW_COMMANDS] = enabled }
     suspend fun saveAutoRotateKeys(enabled: Boolean) = context.dataStore.edit { it[AUTO_ROTATE_KEYS] = enabled }
+    suspend fun saveBodyTextSize(value: String) = context.dataStore.edit { it[BODY_TEXT_SIZE] = value }
 
     /** Wipe every stored preference (keys, models, prompt, skills, catalog). */
     suspend fun clearAll() = context.dataStore.edit { it.clear() }
@@ -157,6 +161,7 @@ class AppPreferences(private val context: Context) {
         root.put("skillsJson", p[SKILLS_JSON] ?: "")
         root.put("modelCatalog", p[MODEL_CATALOG] ?: "")
         root.put("showCommands", p[SHOW_COMMANDS] ?: true)
+        root.put("bodyTextSize", p[BODY_TEXT_SIZE] ?: "normal")
         root.put("useTermuxProxy", p[USE_TERMUX_PROXY] ?: false)
         root.put("termuxProxyUrl", p[TERMUX_PROXY_URL] ?: "http://127.0.0.1:8080/v1")
         root.put("activeConvId", p[ACTIVE_CONV_ID] ?: "")
@@ -187,6 +192,7 @@ class AppPreferences(private val context: Context) {
             e[SKILLS_JSON] = root.optString("skillsJson", "")
             e[MODEL_CATALOG] = root.optString("modelCatalog", "")
             if (root.has("showCommands")) e[SHOW_COMMANDS] = root.optBoolean("showCommands", true)
+            e[BODY_TEXT_SIZE] = root.optString("bodyTextSize", "normal")
             e[USE_TERMUX_PROXY] = root.optBoolean("useTermuxProxy", false)
             e[TERMUX_PROXY_URL] = root.optString("termuxProxyUrl", "http://127.0.0.1:8080/v1")
             val convId = root.optString("activeConvId", "")

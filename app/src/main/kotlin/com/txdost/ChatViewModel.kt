@@ -59,7 +59,8 @@ data class ChatUiState(
     val pendingFileName: String? = null,
     // ── Agent mode + skills ──────────────────────────────────
     val agentMode: String = "build",
-    val skills: List<Skill> = emptyList()
+    val skills: List<Skill> = emptyList(),
+    val bodyTextSize: String = "normal"
 )
 
 // Debug log entry
@@ -169,6 +170,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             prefs.showCommands.collect { v -> _uiState.update { it.copy(showCommands = v) } }
+        }
+        viewModelScope.launch {
+            prefs.bodyTextSize.collect { v -> _uiState.update { it.copy(bodyTextSize = v) } }
         }
 
         // Termux proxy
