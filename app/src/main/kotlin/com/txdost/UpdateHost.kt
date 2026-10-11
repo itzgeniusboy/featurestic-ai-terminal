@@ -222,14 +222,29 @@ private fun requestInstallPermission(context: Context) {
 }
 
 private fun installApk(context: Context, file: File) {
-    try {
+    // Prefer the system installer UI (ACTION_VIEW + FileProvider). The
+    // PackageInstaller session confirm-dialog path is flaky on Android 12/13
+    // (dialog flashes and vanishes without installing), so it is only a fallback.
+    if (!launchSystemInstaller(context, file)) {
         installViaSession(context, file)
-    } catch (e: Exception) {
-        startInstaller(context, file)
     }
 }
 
-/** Modern, reliable self-update via PackageInstaller (avoids installer hangs). */
+/** Opens the stock package installer for the APK; false if it can't be launched. */
+private fun launchSystemInstaller(context: Context, file: File): Boolean = try {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+    true
+} catch (e: Exception) {
+    false
+}
+
+/** Fallback self-update via PackageInstaller session. */
 private fun installViaSession(context: Context, file: File) {
     val installer = context.packageManager.packageInstaller
     val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -238,8 +253,12 @@ private fun installViaSession(context: Context, file: File) {
     val sessionId = installer.createSession(params)
     val session = installer.openSession(sessionId)
     try {
-        session.openWrite("base.apk", 0, file.length()).use { out ->
+        val out = session.openWrite("base.apk", 0, file.length())
+        try {
             file.inputStream().use { it.copyTo(out) }
+            session.fsync(out)
+        } finally {
+            out.close()
         }
         val resultIntent = Intent(context, InstallResultReceiver::class.java)
             .setPackage(context.packageName)
@@ -253,16 +272,6 @@ private fun installViaSession(context: Context, file: File) {
     } finally {
         session.close()
     }
-}
-
-private fun startInstaller(context: Context, file: File) {
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, "application/vnd.android.package-archive")
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    context.startActivity(intent)
 }
 
 private fun uninstallSelf(context: Context) {
