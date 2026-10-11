@@ -112,17 +112,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     // Service connection
     private var txService: TxDostService? = null
+    private var processCollectJob: Job? = null
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             txService = (binder as TxDostService.LocalBinder).getService()
-            // Service ke processes observe karo
-            viewModelScope.launch {
-                txService!!.processes.collect { procs ->
+            // Service ke processes observe karo (purana collector band karke naya — reconnect pe leak nahi hoga)
+            processCollectJob?.cancel()
+            processCollectJob = viewModelScope.launch {
+                txService?.processes?.collect { procs ->
                     _uiState.update { it.copy(activeProcesses = procs) }
                 }
             }
         }
-        override fun onServiceDisconnected(name: ComponentName) { txService = null }
+        override fun onServiceDisconnected(name: ComponentName) {
+            processCollectJob?.cancel()
+            processCollectJob = null
+            txService = null
+        }
     }
 
     init {
@@ -559,7 +565,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val termuxRegex  = Regex("""\[TERMUX:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
             val installRegex = Regex("""\[INSTALL:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
             val writeRegex   = Regex("""<<<WRITE:(.*?)>>>(.*?)<<<END>>>""", RegexOption.DOT_MATCHES_ALL)
-            val bgRegex      = Regex("""\[BG:(.*?)\|(.*?)\|(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
+            val bgRegex      = Regex("""\[BG:(.*?)\|(.*)\|(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
             val stopRegex    = Regex("""\[STOP:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
 
             val hasTermuxActions = listOf(termuxRegex, installRegex, writeRegex, bgRegex, stopRegex)
@@ -1177,7 +1183,7 @@ Now answer the user based on these ACTUAL real-time results.
         }
 
         // 0b. Tool detect karo — [TOOL:filepath|run_command|arg_hint|tool_name]
-        val toolRegex = Regex("""\[TOOL:(.*?)\|(.*?)\|(.*?)\|(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
+        val toolRegex = Regex("""\[TOOL:(.*?)\|(.*)\|(.*?)\|(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
         val toolMatch = toolRegex.find(aiResponse)
         if (toolMatch != null) {
             val tool = ActiveToolTest(

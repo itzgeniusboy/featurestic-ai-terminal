@@ -13,9 +13,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.DataObject
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.Javascript
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -290,13 +296,13 @@ private fun ExplorerFileRow(
         file.name.endsWith(".json") -> c.teal
         else -> c.secondaryLabel
     }
-    val emoji = when {
-        file.isDir -> "📁"
-        file.name.endsWith(".py") -> "🐍"
-        file.name.endsWith(".js") -> "📜"
-        file.name.endsWith(".sh") -> "⚙"
-        file.name.endsWith(".json") -> "{ }"
-        else -> "📄"
+    val icon = when {
+        file.isDir -> Icons.Rounded.Folder
+        file.name.endsWith(".py") -> Icons.Rounded.Code
+        file.name.endsWith(".js") -> Icons.Rounded.Javascript
+        file.name.endsWith(".sh") -> Icons.Rounded.Terminal
+        file.name.endsWith(".json") -> Icons.Rounded.DataObject
+        else -> Icons.Rounded.InsertDriveFile
     }
     Row(
         Modifier
@@ -309,7 +315,7 @@ private fun ExplorerFileRow(
         Box(
             Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(c.fill.copy(alpha = 0.5f)),
             contentAlignment = Alignment.Center
-        ) { Text(emoji) }
+        ) { Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp)) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(file.name, style = MaterialTheme.typography.bodyLarge, color = if (file.isDir) c.label else accent, maxLines = 1, overflow = TextOverflow.Ellipsis)

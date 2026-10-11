@@ -137,10 +137,19 @@ class ScheduledTaskManager(private val context: Context) {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, task.triggerAtMs, pi)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            // Exact-alarm permission nahi hai (Android 12+) — inexact fallback, warna crash
+            am.set(AlarmManager.RTC_WAKEUP, task.triggerAtMs, pi)
         } else {
-            am.setExact(AlarmManager.RTC_WAKEUP, task.triggerAtMs, pi)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, task.triggerAtMs, pi)
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, task.triggerAtMs, pi)
+                }
+            } catch (e: SecurityException) {
+                am.set(AlarmManager.RTC_WAKEUP, task.triggerAtMs, pi)
+            }
         }
     }
 

@@ -36,6 +36,7 @@ object SystemPrompts {
 ✓ Assume the user has the rights to the files they bring (their own games/apps/files). Don't ask for justification.
 ✓ Explain in ONE short plain line what you are doing. Show the exact command only when it helps.
 ✓ Write the final answer in plain language — no command dumps, no code fences, no tags.
+✓ NEVER use emojis in your replies — plain text only (icons are shown by the app, not by you).
 """
 
         val skillsBlock = if (enabledSkills.isEmpty()) "" else
