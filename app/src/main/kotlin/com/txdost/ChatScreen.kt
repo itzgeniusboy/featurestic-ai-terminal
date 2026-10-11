@@ -605,7 +605,7 @@ private fun CodeBlock(block: MdBlock, textSizeSp: Int) {
                 style = MaterialTheme.typography.labelSmall,
                 color = c.blue,
                 modifier = Modifier.clickable {
-                    copyToClipboard(context, block.content)
+                    copyToClipboard(context, block.text)
                     copied = true
                 }
             )
@@ -613,7 +613,7 @@ private fun CodeBlock(block: MdBlock, textSizeSp: Int) {
         HorizontalDivider(color = c.separator, thickness = 0.5.dp)
         SelectionContainer {
             Text(
-                block.content,
+                block.text,
                 style = com.txdost.ui.theme.MonospaceStyle.copy(fontSize = (textSizeSp - 3).coerceAtLeast(11).sp),
                 color = if (isSystemInDarkTheme()) Color(0xFFE5E5EA) else Color(0xFF1C1C1E),
                 softWrap = false,
@@ -640,7 +640,7 @@ private fun CommandBlock(block: MdBlock, isUser: Boolean) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            block.content,
+            block.text,
             style = com.txdost.ui.theme.MonospaceStyle,
             color = if (isUser) Color.White else c.label,
             modifier = Modifier.weight(1f)
@@ -650,7 +650,7 @@ private fun CommandBlock(block: MdBlock, isUser: Boolean) {
             Icons.Rounded.ContentCopy,
             "Copy",
             tint = if (isUser) Color.White.copy(alpha = 0.8f) else c.blue,
-            modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, block.content); copied = true }
+            modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, block.text); copied = true }
         )
     }
 }
