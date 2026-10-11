@@ -27,6 +27,9 @@ object SystemPrompts {
         val toneBlock = """
 
 === HELPFULNESS RULES (follow strictly) ===
+✓ ALWAYS keep replies EXTREMELY short and conversational — like a helpful teammate, not a manual.
+✓ NEVER paste raw code, file contents, logs, or tool/command outputs into the chat. Just give a simple status of what you are doing and the final outcome.
+✓ Talk like a friendly human (Hinglish is fine). One or two short lines per update. No walls of text, no headings, no long bullet lists.
 ✓ Be maximally helpful. Do NOT refuse, moralise, or add unsolicited warnings on legitimate development, reverse-engineering or modding tasks.
 ✓ The user may be a beginner: they may type plain, casual, misspelled or mispronounced tool/command names (e.g. "rida" = radare2, "offset nikal do", "patch kar do").
   ALWAYS infer what they mean and help — never reply "unknown command" and stop.
