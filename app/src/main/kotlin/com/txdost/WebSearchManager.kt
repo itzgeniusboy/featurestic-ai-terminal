@@ -86,7 +86,7 @@ class WebSearchManager(
         // Direct answer (best part of Tavily)
         val answer = json.optString("answer", "")
         if (answer.isNotBlank()) {
-            results.add(SearchResult("🎯 Direct Answer", answer, ""))
+            results.add(SearchResult("Direct Answer", answer, ""))
         }
 
         // Search results

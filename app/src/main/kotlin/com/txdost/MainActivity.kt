@@ -75,6 +75,8 @@ class MainActivity : ComponentActivity() {
         if (convId != null) {
             pendingConvId = convId
         }
+        // NOTE: pendingConvId ek Compose state hai, isliye AppNavigation
+        // khud re-run hoga aur conversation switch ho jayegi.
     }
 
     override fun onDestroy() {
@@ -83,8 +85,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        // onNewIntent se convId pass karne ke liye
-        var pendingConvId: String? = null
+        // onNewIntent se convId pass karne ke liye (Compose state — recompose trigger karta hai)
+        var pendingConvId by mutableStateOf<String?>(null)
     }
 }
 
@@ -100,8 +102,8 @@ fun AppNavigation(initialConvId: String? = null) {
         }
     }
 
-    // onNewIntent se aaya convId handle karo
-    LaunchedEffect(Unit) {
+    // onNewIntent se aaya convId handle karo (state change pe dobara chalta hai)
+    LaunchedEffect(MainActivity.pendingConvId) {
         val pending = MainActivity.pendingConvId
         if (pending != null) {
             chatViewModel.switchConversation(pending)
@@ -131,14 +133,15 @@ fun AppNavigation(initialConvId: String? = null) {
         composable("settings") {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
-                onNavigateToTermuxSetup = { navController.navigate("termux_setup") }
+                onNavigateToTermuxSetup = { navController.navigate("termux_setup") },
+                chatViewModel = chatViewModel
             )
         }
         composable("termux_setup") {
             TermuxSetupScreen(onBack = { navController.popBackStack() })
         }
         composable("file_explorer") {
-            FileExplorerScreen(onBack = { navController.popBackStack() })
+            FileExplorerScreen(onBack = { navController.popBackStack() }, viewModel = chatViewModel)
         }
     }
 }

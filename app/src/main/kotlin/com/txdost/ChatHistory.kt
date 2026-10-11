@@ -94,9 +94,12 @@ class ChatHistoryManager(private val context: Context) {
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 ChatMessage(
-                    role      = obj.getString("role"),
-                    content   = obj.getString("content"),
-                    timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                    role        = obj.getString("role"),
+                    content     = obj.optString("content", ""),
+                    timestamp   = obj.optLong("timestamp", System.currentTimeMillis()),
+                    imageBase64 = obj.optString("imageBase64").ifBlank { null },
+                    imageMime   = obj.optString("imageMime").ifBlank { null },
+                    fileName    = obj.optString("fileName").ifBlank { null }
                 )
             }
         } catch (e: Exception) {
@@ -111,6 +114,9 @@ class ChatHistoryManager(private val context: Context) {
                 put("role",      msg.role)
                 put("content",   msg.content)
                 put("timestamp", msg.timestamp)
+                msg.imageBase64?.let { put("imageBase64", it) }
+                msg.imageMime?.let { put("imageMime", it) }
+                msg.fileName?.let { put("fileName", it) }
             })
         }
         File(historyDir, "conv_$convId.json").writeText(arr.toString())

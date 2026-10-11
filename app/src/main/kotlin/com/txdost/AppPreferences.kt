@@ -28,6 +28,7 @@ class AppPreferences(private val context: Context) {
         val AGENT_MODE         = stringPreferencesKey("agent_mode")
         val SKILLS_JSON        = stringPreferencesKey("skills_json")
         val THEME_MODE         = stringPreferencesKey("theme_mode")
+        val SHOW_COMMANDS      = booleanPreferencesKey("show_commands")
 
         private fun apiKeyKey(providerId: String) = stringPreferencesKey("api_key_$providerId")
         private fun modelKey(providerId: String) = stringPreferencesKey("model_$providerId")
@@ -75,6 +76,7 @@ class AppPreferences(private val context: Context) {
     val agentMode: Flow<String> = context.dataStore.data.map { it[AGENT_MODE] ?: "build" }
     val skillsJson: Flow<String> = context.dataStore.data.map { it[SKILLS_JSON] ?: "" }
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
+    val showCommands: Flow<Boolean> = context.dataStore.data.map { it[SHOW_COMMANDS] ?: true }
 
     // ── Generation ───────────────────────────────────────────
     val globalSystemPrompt: Flow<String> = context.dataStore.data.map {
@@ -102,6 +104,7 @@ class AppPreferences(private val context: Context) {
     suspend fun saveAgentMode(mode: String) = context.dataStore.edit { it[AGENT_MODE] = mode }
     suspend fun saveSkills(json: String) = context.dataStore.edit { it[SKILLS_JSON] = json }
     suspend fun saveThemeMode(mode: String) = context.dataStore.edit { it[THEME_MODE] = mode }
+    suspend fun saveShowCommands(enabled: Boolean) = context.dataStore.edit { it[SHOW_COMMANDS] = enabled }
 
     /** Wipe every stored preference (keys, models, prompt, skills, catalog). */
     suspend fun clearAll() = context.dataStore.edit { it.clear() }
@@ -122,6 +125,10 @@ class AppPreferences(private val context: Context) {
         root.put("themeMode", p[THEME_MODE] ?: "system")
         root.put("skillsJson", p[SKILLS_JSON] ?: "")
         root.put("modelCatalog", p[MODEL_CATALOG] ?: "")
+        root.put("showCommands", p[SHOW_COMMANDS] ?: true)
+        root.put("useTermuxProxy", p[USE_TERMUX_PROXY] ?: false)
+        root.put("termuxProxyUrl", p[TERMUX_PROXY_URL] ?: "http://127.0.0.1:8080/v1")
+        root.put("activeConvId", p[ACTIVE_CONV_ID] ?: "")
         val providers = JSONObject()
         ProviderRegistry.all.forEach { spec ->
             providers.put(spec.id, JSONObject().apply {
@@ -146,6 +153,11 @@ class AppPreferences(private val context: Context) {
             e[THEME_MODE] = root.optString("themeMode", "system")
             e[SKILLS_JSON] = root.optString("skillsJson", "")
             e[MODEL_CATALOG] = root.optString("modelCatalog", "")
+            if (root.has("showCommands")) e[SHOW_COMMANDS] = root.optBoolean("showCommands", true)
+            e[USE_TERMUX_PROXY] = root.optBoolean("useTermuxProxy", false)
+            e[TERMUX_PROXY_URL] = root.optString("termuxProxyUrl", "http://127.0.0.1:8080/v1")
+            val convId = root.optString("activeConvId", "")
+            if (convId.isNotBlank()) e[ACTIVE_CONV_ID] = convId
             val prov = root.optJSONObject("providers")
             if (prov != null) {
                 for (spec in ProviderRegistry.all) {

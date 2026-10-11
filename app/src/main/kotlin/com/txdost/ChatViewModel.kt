@@ -12,6 +12,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.txdost.BuiltInSkills
 import com.txdost.Skill
+import com.txdost.TextUtils
 import com.txdost.TxDostService
 import com.txdost.data.*
 import kotlinx.coroutines.*
@@ -41,6 +42,7 @@ data class ChatUiState(
     val currentModel: String = "glm-4.6",
     val selectedFileContext: String = "",
     val error: String? = null,
+    val showCommands: Boolean = true,
     val activeProcesses: List<com.txdost.ManagedProcess> = emptyList(),
     val debugLogs: List<DebugLogEntry> = emptyList(),   // ← Debug Console
     // ── History ──────────────────────────────────────────────
@@ -144,6 +146,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             prefs.skillsJson.collect { json -> _uiState.update { it.copy(skills = parseSkills(json)) } }
         }
+        viewModelScope.launch {
+            prefs.showCommands.collect { v -> _uiState.update { it.copy(showCommands = v) } }
+        }
 
         // Termux proxy
         viewModelScope.launch {
@@ -229,11 +234,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Auto connection watcher — har 8 sec check karo
+    // Auto connection watcher — har 30 sec check karo
     fun startConnectionWatcher() {
         viewModelScope.launch {
             while (true) {
-                delay(8000)
+                delay(30_000)
                 val termuxConnected = termuxBridge.isConnected()
                 val isOnline = llm.ping(currentApiKey)
                 val prev = _uiState.value
@@ -253,12 +258,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         currentAiJob = null
         txService?.setGenerating(false)
         // 3. UI update
-        val streaming = _uiState.value.streamingText
         val msgs = _uiState.value.messages
-        val newMsgs = if (streaming.isNotEmpty())
-            msgs + ChatMessage("assistant", streaming + "\n\n⏹ [Stopped]")
-        else
-            msgs + ChatMessage("assistant", "⏹ Task rok diya gaya.")
+        val newMsgs = msgs + ChatMessage("assistant", "Rok diya gaya.")
         _uiState.update {
             it.copy(isGenerating = false, streamingText = "", messages = newMsgs)
         }
@@ -288,7 +289,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (proc != null && proc.isRunning) {
             _uiState.update {
                 it.copy(messages = it.messages + ChatMessage("assistant",
-                    "✅ **$name** is already running.\nLog: `${proc.logFile}`"))
+                    "$name pehle se chal raha hai.\nLog: ${proc.logFile}"))
             }
         } else {
             sendMessage("Start the $name bot")
@@ -302,9 +303,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val msgs = _uiState.value.messages
         val idx = msgs.indexOfLast { it.role == "user" }
         if (idx < 0) return
-        val lastUserText = msgs[idx].content
+        val lastUser = msgs[idx]
+        val lastUserText = lastUser.content
         val trimmed = msgs.subList(0, idx).toList()
-        _uiState.update { it.copy(messages = trimmed, error = null) }
+        _uiState.update {
+            it.copy(
+                messages = trimmed,
+                error = null,
+                pendingImageBase64 = lastUser.imageBase64,
+                pendingImageMime = lastUser.imageMime,
+                pendingFileName = lastUser.fileName
+            )
+        }
         sendMessage(lastUserText)
     }
 
@@ -319,7 +329,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (stage == ToolTestStage.WAITING_INPUT && tool != null) {
             val input    = text.trim()
             val userMsg  = ChatMessage("user", input)
-            val runningMsg = ChatMessage("assistant", "⏳ Running tool...")
+            val runningMsg = ChatMessage("assistant", "Tool chal raha hai...")
             val msgsNow  = _uiState.value.messages + userMsg + runningMsg
             _uiState.update {
                 it.copy(
@@ -335,13 +345,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val result  = termuxBridge.runCommandAndGetOutput(command, 30)
                 val output  = result.output.trim().ifEmpty { "(no output received)" }
                 val resultMsg = buildString {
-                    appendLine("**🔧 ${tool.toolName} — Result:**")
+                    appendLine("${tool.toolName} - Result:")
                     appendLine("```")
                     appendLine("$ $command")
                     appendLine(output)
                     appendLine("```")
-                    if (result.success) append("✅ Working correctly!")
-                    else append("⚠️ Something looks wrong.")
+                    if (result.success) append("Tool sahi chal raha hai.")
+                    else append("Kuch galat lag raha hai.")
                 }
                 // "running..." message replace karo result se
                 val withResult = msgsNow.dropLast(1) + ChatMessage("assistant", resultMsg)
@@ -372,7 +382,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 messages = updatedMessages,
                 currentInput = "",
                 isGenerating = true,
-                streamingText = "",
+                streamingText = "Soch raha hoon...",
                 error = null,
                 pendingImageBase64 = null,
                 pendingImageMime = null,
@@ -418,10 +428,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         ).collect { token ->
                             ensureActive()
                             if (token.startsWith("[ERROR]")) localErr = token
-                            else {
-                                localSb.append(token)
-                                _uiState.update { it.copy(streamingText = sb.toString() + localSb.toString()) }
-                            }
+                            else localSb.append(token)
                         }
                         if (localSb.isNotEmpty()) {
                             sb.append(localSb)
@@ -437,12 +444,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val partial = sb.toString()
                 if (partial.isNotEmpty()) {
                     val msgs = _uiState.value.messages + ChatMessage("assistant",
-                        "$partial\n\n⚠️ _Response timed out (90s). Showing partial response._")
+                        "${cleanTags(partial).ifEmpty { partial }}\n\n(Response time out ho gaya - jo aaya dikhaya.)")
                     _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
                     saveConversation(msgs)
                 } else {
                     _uiState.update { it.copy(isGenerating = false, streamingText = "",
-                        error = "⏱️ Timeout — AI did not respond within 90 seconds. Please try again.") }
+                        error = "Time out - AI ne 90 second me jawab nahi diya. Dobara try karo.") }
                 }
                 return@launch
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -462,8 +469,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val aiResponse = sb.toString()
             if (aiResponse.isEmpty()) {
                 _uiState.update { it.copy(isGenerating = false, streamingText = "",
-                    error = (lastError ?: "No response") +
-                        "\n\n_(Tried all available free models — add another provider key in Settings.)_") }
+                    error = (lastError ?: "Koi response nahi aaya") +
+                        "\n\n(Sab free models try ho gaye - Settings me dusra provider key add karo.)") }
                 return@launch
             }
 
@@ -513,17 +520,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     termuxRegex, installRegex, writeRegex, bgRegex, stopRegex)
             } else {
                 // AI responded with text but used no action tags
-                val claimedWork = listOf(
-                    "kar diya", "create kar diya", "likh diya", "ban gaya",
-                    "successfully", "install ho gaya", "start ho gaya", "chal raha hai",
-                    "band kar", "stop kar", "karta hoon", "karo", "chalao", "kill kar",
-                    "band ho", "verify karo", "check karo", "dikha do", "batao",
-                    "done", "created", "written", "started", "stopped", "installed"
-                ).any { aiResponse.contains(it, ignoreCase = true) }
+                val userText = updatedMessages.lastOrNull { it.role == "user" }?.content.orEmpty()
+                val userAskedForAction = isActionRequest(userText)
 
-                // ── AUTO-ENFORCE: AI described steps but used no tags — retry ──
-                if (termuxLive && claimedWork && !hasTermuxActions) {
-                    _uiState.update { it.copy(streamingText = "⚡ Executing commands...") }
+                // ── AUTO-ENFORCE: ONLY when the user asked for a real action ──
+                if (termuxLive && userAskedForAction && !hasTermuxActions) {
+                    _uiState.update { it.copy(streamingText = "Commands chala raha hoon...") }
 
                     val forceMsg = """
 STOP. You only described what to do but used NO ACTION TAGS.
@@ -554,7 +556,7 @@ RULES:
                         ChatMessage("assistant", aiResponse) +
                         ChatMessage("user", forceMsg)
 
-                    _uiState.update { it.copy(streamingText = "") }
+                    _uiState.update { it.copy(streamingText = "Commands chala raha hoon...") }
                     val retrySb = StringBuilder()
 
                     try {
@@ -566,10 +568,7 @@ RULES:
                             fileContext = ""
                         ).collect { token ->
                             ensureActive()
-                            if (!token.startsWith("[ERROR]")) {
-                                retrySb.append(token)
-                                _uiState.update { it.copy(streamingText = retrySb.toString()) }
-                            }
+                            if (!token.startsWith("[ERROR]")) retrySb.append(token)
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) { return@launch }
 
@@ -584,22 +583,21 @@ RULES:
                         handleAllActions(retryResponse, messagesForRetry, fileCreated,
                             termuxRegex, installRegex, writeRegex, bgRegex, stopRegex)
                     } else {
-                        // Still no tags — show response with warning
-                        val warning = "\n\n⚠️ **AI could not execute commands automatically.** " +
-                            "Run manually in Termux:\n```\npkill -9 -f telegram_bot.py\n```"
+                        // Still no tags — just show the (cleaned) reply, no scary warning
+                        val body = cleanTags(retryResponse.ifEmpty { aiResponse })
                         val finalMsgs = _uiState.value.messages +
-                            ChatMessage("assistant", cleanTags(retryResponse.ifEmpty { aiResponse }) + warning)
+                            ChatMessage("assistant", body.ifEmpty { "Ho gaya." })
                         _uiState.update { it.copy(messages = finalMsgs, isGenerating = false, streamingText = "") }
                         saveConversation(finalMsgs)
                     }
                     return@launch
                 }
 
-                // Normal response (no claimed work, just info/chat)
+                // Normal response (info/chat)
                 val display = if (fileCreated != null) {
-                    "${cleanTags(aiResponse)}\n\n✅ File created: **$fileCreated**"
+                    "${cleanTags(aiResponse)}\n\nFile ban gayi: $fileCreated".trim()
                 } else {
-                    aiResponse
+                    cleanTags(aiResponse).ifEmpty { aiResponse }
                 }
 
                 val finalMsgs = _uiState.value.messages + ChatMessage("assistant", display)
@@ -667,7 +665,7 @@ RULES:
         // Step 3: If no results found
         if (allSearchResults.toString().contains("Koi result nahi mila") &&
             !allSearchResults.toString().contains("=== WEB SEARCH RESULTS ===")) {
-            val noResultMsg = "🔍 Web search completed but no results were found. Please try a different query."
+            val noResultMsg = "Web search complete hua lekin koi result nahi mila. Dusra query try karo."
             val finalMsgs = (_uiState.value.messages) + ChatMessage("assistant", noResultMsg)
             _uiState.update { it.copy(messages = finalMsgs, isGenerating = false, streamingText = "") }
             saveConversation(finalMsgs)
@@ -712,9 +710,9 @@ Now answer the user based on these ACTUAL real-time results.
         }
 
         val finalText = finalSb.toString().ifEmpty {
-            "$cleanedResponse\n\n**Search Results:**\n$allSearchResults"
-        }
-        val withFile = if (fileCreated != null) "$finalText\n\n✅ File bana di: **$fileCreated**" else finalText
+            "$cleanedResponse\n\nSearch Results:\n$allSearchResults"
+        }.let { cleanTags(it).ifEmpty { it } }
+        val withFile = if (fileCreated != null) "$finalText\n\nFile bana di: $fileCreated".trim() else finalText
 
         val finalMsgs = _uiState.value.messages + ChatMessage("assistant", withFile)
         _uiState.update { it.copy(messages = finalMsgs, isGenerating = false, streamingText = "") }
@@ -821,7 +819,7 @@ Now answer the user based on these ACTUAL real-time results.
             return
         }
 
-        val finalText = sb.toString().ifBlank { cleaned }
+        val finalText = cleanTags(sb.toString().ifBlank { cleaned }).ifEmpty { cleaned }
         val msgs = _uiState.value.messages + ChatMessage("assistant", finalText)
         _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
         saveConversation(msgs)
@@ -858,7 +856,7 @@ Now answer the user based on these ACTUAL real-time results.
 
     private suspend fun handleExternalBuild(task: String) {
         if (!_uiState.value.termuxConnected) {
-            postAssistant("⚠️ External agent ke liye Termux online hona chahiye.")
+            postAssistant("External agent ke liye Termux online hona chahiye.")
             return
         }
 
@@ -867,8 +865,8 @@ Now answer the user based on these ACTUAL real-time results.
             .output.contains("/opencode")
         if (!installed) {
             postAssistant(
-                "🔌 **External agent (opencode) install nahi hai.**\n\n" +
-                    "Settings → **External agent** → *Install* par tap karein (one tap). " +
+                "External agent (opencode) install nahi hai.\n\n" +
+                    "Settings > External agent > Install par tap karein (one tap). " +
                     "Uske baad yehi task dobara bhejein."
             )
             return
@@ -877,8 +875,8 @@ Now answer the user based on these ACTUAL real-time results.
         val pick = pickExternalProvider()
         if (pick == null) {
             postAssistant(
-                "🔑 Koi provider key nahi mili. Pehle Settings me kisi free provider " +
-                    "(OpenCode Zen / OpenRouter / Groq …) ki key daalein aur ek model chunein."
+                "Koi provider key nahi mili. Pehle Settings me kisi free provider " +
+                    "(OpenCode Zen / OpenRouter / Groq ...) ki key daalein aur ek model chunein."
             )
             return
         }
@@ -903,7 +901,7 @@ Now answer the user based on these ACTUAL real-time results.
         termuxBridge.writeFile("~/opencode_task.txt", task)
 
         // 2. Launch headless, stream to a log file
-        _uiState.update { it.copy(streamingText = "🧠 opencode chal raha hai... (${spec.id}/$model)") }
+        _uiState.update { it.copy(streamingText = "opencode chal raha hai... (${spec.id}/$model)") }
         termuxBridge.runCommandAndGetOutput(
             "cd ~ && nohup sh -c " +
                 "'opencode run \"\$(cat ~/opencode_task.txt)\" --model ${spec.id}/$model --auto --print-logs' " +
@@ -920,7 +918,7 @@ Now answer the user based on these ACTUAL real-time results.
             val tail = termuxBridge
                 .runCommandAndGetOutput("tail -n 40 ~/opencode_run.log 2>/dev/null").output
             if (tail.isNotBlank()) {
-                _uiState.update { it.copy(streamingText = "🧠 opencode:\n\n" + tail.takeLast(1600)) }
+                _uiState.update { it.copy(streamingText = "opencode:\n" + tail.takeLast(1600)) }
             }
             val status = termuxBridge
                 .runCommandAndGetOutput("pgrep -f 'opencode run' >/dev/null && echo RUNNING || echo DONE", 10)
@@ -932,8 +930,8 @@ Now answer the user based on these ACTUAL real-time results.
             .runCommandAndGetOutput("tail -n 150 ~/opencode_run.log 2>/dev/null").output.trim()
         val shown = if (finalLog.length > 4000) finalLog.takeLast(4000) else finalLog
         postAssistant(
-            "🧠 **External agent (opencode) — ${if (done) "complete" else "still running"}**  " +
-                "(`${spec.id}/$model`)\n\n```\n${shown.ifBlank { "(no output)" }}\n```"
+            "External agent (opencode) - ${if (done) "complete" else "still running"}  " +
+                "(${spec.id}/$model)\n\n${shown.ifBlank { "(no output)" }}"
         )
     }
 
@@ -954,18 +952,43 @@ Now answer the user based on these ACTUAL real-time results.
         _uiState.update { it.copy(streamingText = banner) }
     }
 
-    private fun cleanTags(response: String): String = response
-        .replace(Regex("""\[FILE:.*?\]"""), "")
-        .replace(Regex("""\[CONTENT\].*?\[/CONTENT\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[TERMUX:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[INSTALL:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""<<<WRITE:.*?>>>.*?<<<END>>>""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[BG:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[STOP:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[TOOL:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[WEB_SEARCH:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .replace(Regex("""\[BUILD:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
-        .trim()
+    private fun cleanTags(response: String): String = TextUtils.tidy(
+        TextUtils.stripEmoji(
+            response
+                .replace(Regex("""\[FILE:.*?\]"""), "")
+                .replace(Regex("""\[CONTENT\].*?\[/CONTENT\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[TERMUX:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[INSTALL:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""<<<WRITE:.*?>>>.*?<<<END>>>""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[BG:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[STOP:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[TOOL:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[WEB_SEARCH:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("""\[BUILD:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+        )
+    )
+
+    /** Heuristic: did the user actually ASK for an action (not just a question)? */
+    private fun isActionRequest(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        // Questions are never treated as action commands
+        if (t.endsWith("?") || t.contains("?")) return false
+        val qWords = listOf("kya", "kaise", "kaisa", "kyun", "kyu", "kab", "kahan",
+            "what", "how", "why", "when", "where", "which", "who", "explain", "samjha")
+        val first = t.lowercase().substringBefore(" ").trim()
+        if (qWords.contains(first)) return false
+        val verbs = listOf(
+            "banao", "bana", "create", "make", "likho", "likh", "write",
+            "install", "setup", "set up", "daalo", "daal", "add",
+            "chalao", "chala", "run", "start", "launch", "shuru",
+            "band", "stop", "kill", "rok", "delete", "hata", "remove",
+            "fix", "theek", "patch", "mod", "crack", "edit", "change",
+            "download", "clone", "update", "upgrade", "build", "compile",
+            "nikal", "find", "dhoondh", "extract", "decompile", "disassemble"
+        )
+        return verbs.any { t.lowercase().contains(it) }
+    }
 
     private fun tryCreateFileFromResponse(response: String): String? {
         return try {
@@ -1017,7 +1040,7 @@ Now answer the user based on these ACTUAL real-time results.
             if (needsInput) {
                 val askMsg = ChatMessage(
                     "assistant",
-                    "\uD83D\uDD27 **${tool.toolName}** is ready!\nProvide input to test: **${tool.argHint}**"
+                    "${tool.toolName} ready hai.\nTest ke liye input do: ${tool.argHint}"
                 )
                 _uiState.update {
                     it.copy(
@@ -1028,18 +1051,18 @@ Now answer the user based on these ACTUAL real-time results.
                 }
             } else {
                 // No input needed — run directly
-                val runMsg = ChatMessage("assistant", "\uD83D\uDD27 **${tool.toolName}** is being tested...")
+                val runMsg = ChatMessage("assistant", "${tool.toolName} test ho raha hai...")
                 _uiState.update { it.copy(messages = it.messages + runMsg) }
                 val result = termuxBridge.runCommandAndGetOutput(tool.runCommand, 30)
                 val output = result.output.trim().ifEmpty { "(no output received)" }
                 val resultMsg = buildString {
-                    appendLine("**\uD83D\uDD27 ${tool.toolName} — Test Result:**")
+                    appendLine("${tool.toolName} - Test Result:")
                     appendLine("```")
                     appendLine("$ ${tool.runCommand}")
                     appendLine(output)
                     appendLine("```")
-                    if (result.success) append("\u2705 Tool is working correctly!")
-                    else append("\u26A0\uFE0F Something looks wrong.")
+                    if (result.success) append("Tool sahi chal raha hai.")
+                    else append("Kuch galat lag raha hai.")
                 }
                 val prevMsgs = _uiState.value.messages
                 val updatedMsgs = prevMsgs.dropLast(1) + ChatMessage("assistant", resultMsg)
@@ -1190,7 +1213,7 @@ Now answer the user based on these ACTUAL real-time results.
             ChatMessage("assistant", cleanResponse.ifEmpty { "Executing..." }) +
             ChatMessage("user", resultFeedback)
 
-        _uiState.update { it.copy(streamingText = "") }
+        _uiState.update { it.copy(streamingText = "Summarizing...") }
         val finalSb = StringBuilder()
 
         llm.chatStream(
@@ -1200,10 +1223,7 @@ Now answer the user based on these ACTUAL real-time results.
             systemPrompt = buildSystemPrompt(true, "", ""),
             fileContext = ""
         ).collect { token ->
-            if (!token.startsWith("[ERROR]")) {
-                finalSb.append(token)
-                _uiState.update { it.copy(streamingText = finalSb.toString()) }
-            }
+            if (!token.startsWith("[ERROR]")) finalSb.append(token)
         }
 
         val finalText = finalSb.toString().ifEmpty {
@@ -1211,10 +1231,11 @@ Now answer the user based on these ACTUAL real-time results.
         }
         // Debug log — AI ka final response
         addDebugLog(DebugLogType.AI_RECV, "← AI response", finalText.take(200))
-        val withFile = if (fileCreated != null) "$finalText\n\n✅ App file: **$fileCreated**" else finalText
+        val cleanFinal = cleanTags(finalText).ifEmpty { finalText }
+        val withFile = if (fileCreated != null) "$cleanFinal\n\nApp file: $fileCreated".trim() else cleanFinal
 
         // Notification bhejo
-        txService?.sendNotification("✅ Task Complete", cleanResponse.take(60).ifEmpty { "Kaam ho gaya" })
+        txService?.sendNotification("Task Complete", cleanResponse.take(60).ifEmpty { "Kaam ho gaya" })
         txService?.setGenerating(false)
 
         val actionFinalMsgs = _uiState.value.messages + ChatMessage("assistant", withFile)
@@ -1265,422 +1286,15 @@ Now answer the user based on these ACTUAL real-time results.
         return out.toList()
     }
 
-    private fun buildSystemPrompt(termuxConnected: Boolean, deviceInfo: String, activeProcs: String): String {
-        val base = currentSystemPrompt.ifBlank {
-            "You are Featurestic AI Terminal — a senior full-stack software engineer agent running inside Android/Termux. " +
-                "You build and ship COMPLETE software: Android/Kotlin apps, web apps, Node/Python tools, scripts, bots, CLIs — not just bots. " +
-                "Be direct and act immediately: inspect the workspace, write the real files, install dependencies, run builds and tests, and fix errors yourself until it works. " +
-                "Think like a lead engineer: recon → plan → implement → build → verify. Keep chat replies short and clean — never send long, unnecessary messages."
-        }
-
-        val enabledSkills = _uiState.value.skills.filter { it.enabled }
-        val skillsBlock = if (enabledSkills.isEmpty()) "" else
-            "\n\n=== ACTIVE SKILLS (follow strictly) ===\n" +
-                enabledSkills.joinToString("\n") { "- ${it.instruction}" }
-
-        val modeBlock = if (_uiState.value.agentMode == "plan") {
-            "\n\n=== MODE: PLAN (read-only) ===\nYou are in PLAN mode. You may INSPECT but must NOT change or run anything.\n" +
-                "ALLOWED: [WEB_SEARCH:query] and READ-ONLY commands like [TERMUX:ls -la ~], [TERMUX:cat file], " +
-                "[TERMUX:grep -r TODO .], [TERMUX:find . -name '*.kt'], [TERMUX:tree], [TERMUX:du -sh *]. " +
-                "Use these ONLY to inspect and understand, then reply with a short clean plan.\n" +
-                "FORBIDDEN (never output these in plan mode): [INSTALL:], <<<WRITE:...>>>, [BG:], [STOP:], " +
-                "and any command that creates/changes/deletes files or starts/stops/mutates anything " +
-                "(echo>, rm, mv, cp, mkdir, sed -i, pkg, pip, npm, git, curl, kill, etc.)."
-        } else {
-            "\n\n=== MODE: BUILD ===\nYou may execute actions with action tags when needed. Keep the reply short and clean."
-        }
-
-        // ── General app-building + delegation to the external agent ──
-        val builderSection = """
-
-╔══════════════════════════════════════════╗
-║      APP BUILDER — GENERAL WORKFLOW      ║
-╚══════════════════════════════════════════╝
-You are NOT limited to bots — build ANY software the user asks for:
-Android/Kotlin apps, web apps, Node / Python / Flask tools, CLIs, scripts, bots.
-
-WORKFLOW (follow in order):
-1. RECON    — inspect first: [TERMUX:ls -la ~/project] , [TERMUX:cat file]
-2. SCAFFOLD — create the real files: <<<WRITE:path>>> full content <<<END>>>
-3. DEPS     — system: [INSTALL:nodejs] ; language: [TERMUX:pip install ...] / [TERMUX:npm install ...]
-4. BUILD/RUN— run it (see LONG JOBS below)
-5. FIX      — read the error, fix the file, run again. Repeat until it works.
-Do the WHOLE thing; never just describe it.
-
-LONG JOBS (builds / installs that take minutes):
-Never block on a long command. Start it in background, then poll the log:
-   [BG:Build|cd ~/project && <build cmd> 2>&1 | tee ~/build.log|~/build.log]
-   [TERMUX:sleep 5 && tail -n 40 ~/build.log]
-Repeat the tail until you see success or an error, then fix + rebuild.
-
-DELEGATE BIG BUILDS TO A FULL AGENT (opencode):
-For large multi-file projects or "build the whole app", hand off to the
-external coding agent installed in Termux:
-   [BUILD:complete task description]
-The app runs opencode (headless) using the user's EXISTING API key and streams
-its log back to this chat. Use ONE clear, complete prompt. First check install:
-   [TERMUX:command -v opencode || echo NOT_INSTALLED]
-"""
-
-        // ── Web Search — ALWAYS available ──────────────────────────
-        val webSearchSection = """
-
-╔══════════════════════════════════════════╗
-║         WEB SEARCH — REAL-TIME           ║
-╚══════════════════════════════════════════╝
-Format: [WEB_SEARCH:query]
-
-WHEN TO USE:
-→ News, latest updates, current events → [WEB_SEARCH:India news today 2026]
-→ Prices (crypto, stocks) → [WEB_SEARCH:bitcoin price today]
-→ Technical errors → [WEB_SEARCH:python telebot error fix]
-→ Anything that requires current/live information
-
-HARD RULES:
-✗ NEVER say "I cannot access the internet"
-✗ NEVER say "my knowledge cutoff is..."
-✓ Use [WEB_SEARCH:] — real results will be fetched
-"""
-
-        // ── App File Manager ───────────────────────────────────────
-        val fileSection = """
-╔══════════════════════════════════════════╗
-║           APP FILE MANAGER               ║
-╚══════════════════════════════════════════╝
-[FILE:filename.ext]
-[CONTENT]
-...file content...
-[/CONTENT]
-"""
-
-        if (!termuxConnected) {
-            return base + skillsBlock + modeBlock + webSearchSection + fileSection + """
-
-⚠ STATUS: Termux OFFLINE
-→ Web Search and File creation are available.
-→ Termux commands are NOT available.
-"""
-        }
-
-        val deviceSection = if (deviceInfo.isNotEmpty()) "\n── Device Info ──\n$deviceInfo\n" else ""
-        val procsSection  = if (activeProcs.isNotBlank() && activeProcs != "None")
-            "\n── Active Processes ──\n$activeProcs\n" else ""
-
-        return base + skillsBlock + modeBlock + builderSection + webSearchSection + fileSection + deviceSection + procsSection + """
-
-╔══════════════════════════════════════════╗
-║     TERMUX DIRECT CONTROL — ONLINE       ║
-╚══════════════════════════════════════════╝
-
-TERMUX IS ONLINE. You can run commands directly.
-NEVER say "I cannot do this." DO IT.
-
-━━━ CRITICAL ANTI-LIE RULES ━━━
-
-✗✗✗ NEVER MAKE FALSE CLAIMS ✗✗✗
-→ Only say "stopped" if you actually used [STOP:name]
-→ Only say "started" if you actually used [BG:...]
-→ Only say "command ran" if you actually used [TERMUX:...]
-→ Just talking = lying. DO the action, then report it.
-
-HOW TO STOP A PROCESS:
-→ Stop process: [STOP:Telegram Bot]
-→ Also run these to confirm:
-   [TERMUX:pkill -9 -f telegram_bot.py 2>/dev/null; echo "Kill sent"]
-   [TERMUX:pgrep -f telegram_bot && echo "STILL RUNNING" || echo "CONFIRMED STOPPED"]
-→ Process name must match EXACTLY what was used in [BG:...]
-
-⚡ TEMPLATE TO STOP SOMETHING:
-[STOP:Process Name]
-[TERMUX:pkill -9 -f script_name.py 2>/dev/null; echo done]
-[TERMUX:pgrep -f script_name && echo RUNNING || echo STOPPED]
-
-━━━ ACTIONS (use exact format) ━━━
-
-① RUN A COMMAND:
-[TERMUX:command here]
-e.g. [TERMUX:python3 --version]
-e.g. [TERMUX:ls ~/]
-e.g. [TERMUX:pip install pyTelegramBotAPI]
-
-② INSTALL A PACKAGE:
-[INSTALL:package_name]
-e.g. [INSTALL:python]
-
-③ WRITE A FILE (with FULL content):
-<<<WRITE:~/filepath.py>>>
-...full file content here...
-<<<END>>>
-⚠ REQUIRED: Full code must be between <<<WRITE:>>> and <<<END>>>.
-⚠ Do NOT leave content empty — the file will be broken.
-
-④ START A BACKGROUND PROCESS:
-[BG:Process Name|command|~/logfile.log]
-e.g. [BG:Telegram Bot|python3 ~/telegram_bot.py|~/bot.log]
-
-⑤ STOP A PROCESS:
-[STOP:Process Name]
-
-⑥ TEST A TOOL:
-[TOOL:~/filepath|run_command|arg_hint|Tool Name]
-arg_hint EMPTY = auto-run, FILLED = ask user for input
-
-━━━ HOW TO BUILD A TELEGRAM BOT — EXACT STEPS ━━━
-
-When user asks to create a telegram bot, do ALL of this in one response:
-
-STEP 1 — Packages install:
-[INSTALL:python]
-[TERMUX:pip install pyTelegramBotAPI requests]
-
-STEP 2 — Write the bot file (use TOKEN if provided, otherwise use YOUR_TOKEN_HERE):
-<<<WRITE:~/telegram_bot.py>>>
-import telebot, os, time, logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.expanduser('~/bot.log')),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-BOT_TOKEN = "YOUR_TOKEN_HERE"
-bot = telebot.TeleBot(BOT_TOKEN)
-
-@bot.message_handler(commands=['start'])
-def start(msg):
-    bot.reply_to(msg, "Hello! I am Featurestic AI Bot. Type /help for commands.")
-
-@bot.message_handler(commands=['help'])
-def help_cmd(msg):
-    bot.reply_to(msg, "/start - Start\n/help - Help\n/time - Time")
-
-@bot.message_handler(commands=['time'])
-def time_cmd(msg):
-    import datetime
-    bot.reply_to(msg, f"Current time: {datetime.datetime.now().strftime('%H:%M:%S')}")
-
-@bot.message_handler(func=lambda m: True)
-def echo(msg):
-    bot.reply_to(msg, f"You said: {msg.text}")
-
-if __name__ == "__main__":
-    logger.info("Bot is starting...")
-    while True:
-        try:
-            bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            logger.error(f"Crash: {e}")
-            time.sleep(5)
-<<<END>>>
-
-STEP 3 — Set token (if user provided one):
-[TERMUX:sed -i 's/YOUR_TOKEN_HERE/USER_KA_TOKEN/' ~/telegram_bot.py]
-
-STEP 4 — Test it:
-[TERMUX:timeout 15 python3 ~/telegram_bot.py 2>&1]
-
-STEP 5 — Start in background:
-[BG:Telegram Bot|python3 ~/telegram_bot.py|~/bot.log]
-
-STEP 6 — Check logs:
-[TERMUX:sleep 3 && tail -20 ~/bot.log]
-
-━━━ TERMUX — COMPLETE COMMAND REFERENCE ━━━
-
-📁 FILES & DIRECTORIES:
-ls -la ~/              → list all files (including hidden)
-cd ~/scripts           → navigate to folder
-mkdir -p ~/myfolder    → create folder
-rm -rf ~/file.txt      → delete file (CAREFUL!)
-cp ~/a.py ~/b.py       → copy file
-mv ~/old.py ~/new.py   → rename/move
-cat ~/file.txt         → read file
-head -20 ~/file.txt    → first 20 lines
-tail -50 ~/bot.log     → last 50 lines (great for logs)
-tail -f ~/bot.log      → follow live log output
-wc -l ~/file.py        → count lines
-find ~/ -name "*.py"   → find all Python files
-du -sh ~/              → disk usage
-df -h                  → total storage
-chmod +x ~/script.sh   → make file executable
-
-🐍 PYTHON:
-python3 --version                    → Python version
-python3 ~/script.py                  → run a script
-python3 -c "print('hello')"         → quick inline command
-pip install requests telebot flask   → install packages
-pip list                             → list installed packages
-pip uninstall package_name           → uninstall
-pip show package_name                → package info
-python3 -m venv ~/myenv              → create virtual env
-source ~/myenv/bin/activate          → activate venv
-
-📦 PACKAGE MANAGEMENT:
-pkg update && pkg upgrade            → update system
-pkg list-installed                   → installed packages
-apt list --installed                 → apt packages
-
-⚠️ INSTALL TAG RULES (IMPORTANT):
-- Use [INSTALL:package_name] for ALL pkg installs — runs silently, no output flood
-- For large packages (ffmpeg, nodejs, python, imagemagick): ALWAYS use [INSTALL:pkg]
-- NEVER use [TERMUX:pkg install ...] — floods output with 500+ lines and breaks AI
-- Multiple packages: separate tags → [INSTALL:python] then [INSTALL:ffmpeg]
-- [INSTALL:] auto-trims output — you get clean ✅ installed or ❌ failed result
-
-🔄 PROCESS MANAGEMENT:
-ps aux                               → list all processes
-ps aux | grep python                 → filter python processes
-pgrep -f telegram_bot                → get PID of specific process
-kill PID                             → stop process (gentle)
-kill -9 PID                          → force kill
-pkill -f script_name                 → kill by name
-pkill -9 -f script_name              → force kill by name
-jobs                                 → list background jobs
-nohup python3 ~/bot.py &             → run in background
-
-📊 SYSTEM INFO:
-uname -a                             → system info
-free -h                              → RAM usage
-top                                  → live system monitor (q to quit)
-uptime                               → system uptime
-whoami                               → current user
-echo ${'$'}HOME                      → home directory
-env                                  → environment variables
-echo ${'$'}PATH                      → PATH variable
-
-🌐 NETWORK:
-curl https://api.example.com         → GET request
-curl -X POST -d '{}' URL            → POST request
-wget https://file.com/file.zip      → download file
-ping -c 4 google.com                 → check network
-netstat -tulpn                       → open ports
-ssh user@ip                          → SSH connect
-scp file.txt user@ip:~/             → transfer file via SSH
-
-📝 TEXT PROCESSING:
-grep "error" ~/bot.log               → search text
-grep -r "TODO" ~/scripts/           → recursive search
-sed -i 's/OLD/NEW/g' ~/file.py      → find & replace in file
-awk '{print ${'$'}1}' ~/file.txt     → extract column
-sort ~/file.txt                      → sort file
-uniq                                 → remove duplicates
-wc -l ~/file.txt                    → count lines
-cut -d',' -f1 ~/data.csv           → extract CSV column
-
-🗃️ ARCHIVE:
-zip -r backup.zip ~/scripts/        → create zip
-unzip backup.zip                     → extract zip
-tar -czf backup.tar.gz ~/scripts/  → create tar.gz
-tar -xzf backup.tar.gz              → extract tar.gz
-
-⚙️ SCHEDULING (cron):
-crontab -e                           → edit cron jobs
-crontab -l                           → list current crons
-# Format: minute hour day month weekday command
-# 0 9 * * * python3 ~/script.py    → daily at 9am
-
-🔐 ENVIRONMENT VARIABLES:
-export MY_TOKEN="abc123"             → set variable
-echo ${'$'}MY_TOKEN                  → read variable
-echo 'export TOKEN="xyz"' >> ~/.bashrc  → save permanently
-
-📡 GIT:
-git clone https://github.com/repo   → clone repo
-git status                           → view changes
-git add .                            → stage all changes
-git commit -m "message"              → commit
-git push                             → push to remote
-git pull                             → pull latest
-
-🤖 WHATSAPP BOT (Node.js + whatsapp-web.js):
-━━━ HOW TO BUILD A WHATSAPP BOT — EXACT STEPS ━━━
-
-STEP 1 — Setup:
-[INSTALL:nodejs]
-[TERMUX:mkdir -p ~/whatsapp_bot && cd ~/whatsapp_bot && npm init -y && npm install whatsapp-web.js qrcode-terminal]
-
-STEP 2 — Write the bot file:
-<<<WRITE:~/whatsapp_bot/bot.js>>>
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: { args: ['--no-sandbox'] }
-});
-
-client.on('qr', qr => {
-    console.log('Scan this QR code in WhatsApp:');
-    qrcode.generate(qr, { small: true });
-});
-
-client.on('ready', () => {
-    console.log('WhatsApp Bot ready!');
-});
-
-client.on('message', async msg => {
-    if (msg.body === '!help') {
-        msg.reply('Commands:\n!help - Help\n!ping - Pong\n!time - Time');
-    } else if (msg.body === '!ping') {
-        msg.reply('Pong! 🏓');
-    } else if (msg.body === '!time') {
-        msg.reply('Time: ' + new Date().toLocaleString());
-    }
-});
-
-client.initialize();
-<<<END>>>
-
-STEP 3 — Start it (you will need to scan a QR code):
-[TERMUX:cd ~/whatsapp_bot && node bot.js]
-
-STEP 4 — Run in background (after QR scan):
-[BG:WhatsApp Bot|cd ~/whatsapp_bot && node bot.js|~/whatsapp_bot/bot.log]
-
-🔧 DEBUGGING:
-python3 -c "import traceback; ..." → quick debug
-python3 -m py_compile ~/script.py  → syntax check without running
-strace -p PID                        → trace process
-lsof -i :8080                        → who is using port 8080
-
-💡 USEFUL TRICKS:
-echo "hello" >> ~/file.txt          → append to file
-> ~/file.txt                        → empty a file
-command1 && command2                 → run command2 only if command1 succeeds
-command1 || command2                 → run command2 only if command1 fails
-command1 | command2                  → pipe output
-command > output.txt 2>&1           → save stdout+stderr
-sleep 5 && command                  → run after 5 seconds
-timeout 30 command                  → run with 30 second limit
-watch -n 5 command                  → repeat every 5 seconds
-
-━━━ GOLDEN RULES — NEVER VIOLATE ━━━
-
-✗ "I wrote the file" — NEVER say this unless you used <<<WRITE:>>>
-✗ "Bot is created" — NEVER say this unless steps actually ran
-✗ "Token is invalid" — NEVER say this without testing first
-✗ "I used [STOP:name]" — NEVER say this without actually using the tag
-✓ Do the work FIRST, then report what you did
-✓ If an error occurs: check the LOG, fix it, retry
-✓ To stop a process: ALWAYS use the [STOP:Exact Name] tag
-
-━━━ SELF-HEALING ━━━
-
-If an error occurs:
-1. [TERMUX:tail -30 ~/bot.log]
-2. Read the error
-3. ModuleNotFoundError → [TERMUX:pip install MODULE_NAME]
-4. SyntaxError → fix the code, update with <<<WRITE:>>>
-5. Token error → ask user for a new token
-6. After fix: [STOP:Telegram Bot] then [BG:Telegram Bot|python3 ~/telegram_bot.py|~/bot.log]
-
-STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
-"""
-    }
+    private fun buildSystemPrompt(termuxConnected: Boolean, deviceInfo: String, activeProcs: String): String =
+        SystemPrompts.build(
+            customPrompt = currentSystemPrompt,
+            enabledSkills = _uiState.value.skills.filter { it.enabled },
+            planMode = _uiState.value.agentMode == "plan",
+            termuxConnected = termuxConnected,
+            deviceInfo = deviceInfo,
+            activeProcs = activeProcs
+        )
 
     fun clearChat() {
         _uiState.update { it.copy(messages = emptyList(), streamingText = "", error = null) }
@@ -1743,20 +1357,20 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
         val lastLines = lines.takeLast(3)
 
         return buildString {
-            appendLine("📊 Output Summary (${lines.size} lines → compressed):")
+            appendLine("Output Summary (${lines.size} lines -> compressed):")
             if (errorLines.isNotEmpty()) {
-                appendLine("❌ ERRORS FOUND:")
+                appendLine("ERRORS FOUND:")
                 errorLines.distinct().take(8).forEach { appendLine("  $it") }
             }
             if (successLines.isNotEmpty() && errorLines.isEmpty()) {
-                appendLine("✅ SUCCESS:")
+                appendLine("SUCCESS:")
                 successLines.take(4).forEach { appendLine("  $it") }
             }
             if (errorLines.isEmpty() && successLines.isEmpty()) {
-                appendLine("📄 Last output:")
+                appendLine("Last output:")
                 lastLines.forEach { appendLine("  $it") }
             }
-            appendLine("─── Full cmd: $cmd")
+            appendLine("--- Full cmd: $cmd")
         }.trim()
     }
 
@@ -1874,6 +1488,7 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
     }
 
     fun setAgentMode(mode: String) = viewModelScope.launch { prefs.saveAgentMode(mode) }
+    fun setShowCommands(enabled: Boolean) = viewModelScope.launch { prefs.saveShowCommands(enabled) }
 
     fun toggleSkill(id: String) {
         val updated = _uiState.value.skills.map { if (it.id == id) it.copy(enabled = !it.enabled) else it }
@@ -1931,7 +1546,7 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
         txService?.scheduleResearchTask(task)
         val msg = ChatMessage(
             "assistant",
-            "\uD83D\uDCC5 **Research Scheduled!**\n\n**Topic:** $topic\n**When:** ${java.text.SimpleDateFormat("dd MMM, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(triggerAtMs))}\n**Repeat:** ${repeat.name}\n\nYou can close the app — research will run automatically at the scheduled time and you'll receive a notification. Tap the notification to open this conversation."
+            "Research Scheduled!\n\nTopic: $topic\nWhen: ${java.text.SimpleDateFormat("dd MMM, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(triggerAtMs))}\nRepeat: ${repeat.name}\n\nYou can close the app - research will run automatically at the scheduled time and you'll get a notification. Tap it to open this conversation."
         )
         _uiState.update { it.copy(messages = it.messages + msg) }
         viewModelScope.launch {
@@ -1985,21 +1600,20 @@ STATUS: Termux ONLINE ✓ | Web Search ONLINE ✓ | Self-Heal ACTIVE ✓
     // ── Direct command run — Run button se call hota hai ────────
     fun runCommandDirect(command: String) {
         if (_uiState.value.isGenerating) return
-        val cmdMsg = ChatMessage("user", "▶ Run: `$command`")
+        val cmdMsg = ChatMessage("user", "Run: $command")
         _uiState.update {
             it.copy(
                 messages      = it.messages + cmdMsg,
                 isGenerating  = true,
-                streamingText = "⚡ Running: $command"
+                streamingText = "Running: $command"
             )
         }
         viewModelScope.launch {
             val result  = termuxBridge.runCommandAndGetOutput(command, 60)
             val output  = result.output.trim().ifEmpty { "(no output)" }
-            val icon    = if (result.success) "✅" else "❌"
             val resultMsg = ChatMessage(
                 "assistant",
-                "$icon `$ $command`\n```\n$output\n```"
+                "$ $command\n$output"
             )
             val newMsgs = _uiState.value.messages + resultMsg
             _uiState.update {

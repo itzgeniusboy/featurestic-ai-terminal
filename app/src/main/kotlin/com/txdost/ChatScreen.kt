@@ -32,6 +32,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.txdost.R
+import com.txdost.TextUtils
 import com.txdost.data.ChatMessage
 import com.txdost.data.Conversation
 import com.txdost.ui.components.*
@@ -76,16 +77,10 @@ fun ChatScreen(
         }
     }
 
-    val totalItems = uiState.messages.size + if (uiState.streamingText.isNotEmpty()) 1 else 0
+    val totalItems = uiState.messages.size
 
     LaunchedEffect(uiState.messages.size) {
         if (totalItems > 0) coroutineScope.launch { listState.animateScrollToItem(totalItems - 1) }
-    }
-    LaunchedEffect(uiState.streamingText.length) {
-        if (uiState.streamingText.isNotEmpty()) {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            if (lastVisible >= totalItems - 3) coroutineScope.launch { listState.animateScrollToItem(totalItems - 1) }
-        }
     }
 
     Box(Modifier.fillMaxSize().background(c.bg).imePadding()) {
@@ -110,6 +105,7 @@ fun ChatScreen(
                         options = listOf("Build", "Plan"),
                         selectedIndex = if (uiState.agentMode == "plan") 1 else 0,
                         onSelect = { chatViewModel.setAgentMode(if (it == 1) "plan" else "build") },
+                        selectedColors = listOf(c.blue, c.orange),
                         modifier = Modifier.width(150.dp)
                     )
                     Spacer(Modifier.weight(1f))
@@ -133,7 +129,6 @@ fun ChatScreen(
                         add(("Cloud" to uiState.ollamaOnline))
                         add(("Termux" to uiState.termuxConnected))
                         add((uiState.providerId.replaceFirstChar { it.uppercase() } to true))
-                        if (uiState.agentMode == "plan") add(("Plan" to true))
                         val skillCount = uiState.skills.count { it.enabled }
                         if (skillCount > 0) add(("$skillCount skill${if (skillCount > 1) "s" else ""}" to true))
                         if (uiState.activeProcesses.isNotEmpty()) add(("${uiState.activeProcesses.size} running" to true))
@@ -156,24 +151,26 @@ fun ChatScreen(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (uiState.messages.isEmpty() && uiState.streamingText.isEmpty()) {
+                if (uiState.messages.isEmpty()) {
                     item { EmptyChatState(termuxConnected = uiState.termuxConnected) }
                 }
                 val lastAssistantIdx = uiState.messages.indexOfLast { it.role == "assistant" }
                 itemsIndexed(uiState.messages) { idx, msg ->
                     MessageBubble(
                         message = msg,
+                        chatViewModel = chatViewModel,
+                        showCommands = uiState.showCommands,
                         onRegenerate = if (idx == lastAssistantIdx && !uiState.isGenerating)
                             ({ chatViewModel.regenerate() }) else null
                     )
                 }
-                if (uiState.streamingText.isNotEmpty()) {
-                    item { MessageBubble(ChatMessage("assistant", uiState.streamingText), isStreaming = true) }
-                }
-                if (uiState.isGenerating && uiState.streamingText.isEmpty()) {
-                    item { TypingBubble() }
-                }
             }
+
+            InputStatusBar(
+                planMode = uiState.agentMode == "plan",
+                isGenerating = uiState.isGenerating,
+                status = uiState.streamingText
+            )
 
             ChatInputBar(
                 value = uiState.currentInput,
@@ -280,35 +277,20 @@ private fun ChatNavBar(
                 IconButton(onClick = { menu = true }) {
                     Icon(Icons.Rounded.MoreHoriz, "More", tint = c.blue, modifier = Modifier.size(26.dp))
                 }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    AppleMenuItem("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
-                    AppleMenuItem("Terminal", Icons.Rounded.Terminal) { menu = false; onTerminal() }
-                    AppleMenuItem("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
-                    AppleMenuItem("Skills", Icons.Rounded.AutoAwesome) { menu = false; onSkills() }
-                    AppleMenuItem("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
-                    AppleMenuItem("Settings", Icons.Rounded.Settings) { menu = false; onSettings() }
-                    HorizontalDivider()
-                    AppleMenuItem("Clear chat", Icons.Rounded.Delete, danger = true) { menu = false; onClear() }
+                AppleMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    AppleMenuRow("New chat", Icons.Rounded.Add) { menu = false; onNewChat() }
+                    AppleMenuRow("Terminal", Icons.Rounded.Terminal) { menu = false; onTerminal() }
+                    AppleMenuRow("Files", Icons.Rounded.Folder) { menu = false; onFiles() }
+                    AppleMenuRow("Skills", Icons.Rounded.AutoAwesome) { menu = false; onSkills() }
+                    AppleMenuRow("Schedule", Icons.Rounded.Schedule) { menu = false; onSchedule() }
+                    AppleMenuRow("Settings", Icons.Rounded.Settings) { menu = false; onSettings() }
+                    AppleMenuDivider()
+                    AppleMenuRow("Clear chat", Icons.Rounded.Delete, danger = true) { menu = false; onClear() }
                 }
             }
         }
         HorizontalDivider(color = c.separator, thickness = 0.5.dp)
     }
-}
-
-@Composable
-private fun AppleMenuItem(
-    text: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    danger: Boolean = false,
-    onClick: () -> Unit
-) {
-    val c = Apple.colors
-    DropdownMenuItem(
-        text = { Text(text, color = if (danger) c.red else c.label) },
-        onClick = onClick,
-        leadingIcon = { Icon(icon, null, tint = if (danger) c.red else c.blue) }
-    )
 }
 
 // ── Banners ──────────────────────────────────────────────────
@@ -361,7 +343,8 @@ private fun ErrorBanner(message: String) {
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
-    isStreaming: Boolean = false,
+    chatViewModel: ChatViewModel,
+    showCommands: Boolean = true,
     onRegenerate: (() -> Unit)? = null
 ) {
     val c = Apple.colors
@@ -414,8 +397,10 @@ private fun MessageBubble(
                     }
                     if (message.content.isNotBlank()) {
                         FormattedMessage(
-                            text = message.content + if (isStreaming) " ▌" else "",
-                            isUser = isUser
+                            text = message.content,
+                            isUser = isUser,
+                            chatViewModel = chatViewModel,
+                            showCommands = showCommands
                         )
                     }
                 }
@@ -448,7 +433,12 @@ private fun MessageBubble(
 }
 
 @Composable
-private fun FormattedMessage(text: String, isUser: Boolean) {
+private fun FormattedMessage(
+    text: String,
+    isUser: Boolean,
+    chatViewModel: ChatViewModel,
+    showCommands: Boolean
+) {
     val c = Apple.colors
     val segments = parseMessageSegments(text)
     val bodyColor = if (isUser) Color.White else c.label
@@ -457,8 +447,7 @@ private fun FormattedMessage(text: String, isUser: Boolean) {
         segments.forEach { segment ->
             when (segment.type) {
                 SegmentType.CODE -> CodeBlock(segment)
-                SegmentType.COMMAND -> CommandBlock(segment, isUser)
-                SegmentType.STATUS -> StatusRow(segment.content, isUser)
+                SegmentType.COMMAND -> if (showCommands) CommandBlock(segment, isUser)
                 SegmentType.NORMAL -> if (segment.content.isNotBlank()) LinkText(segment.content, bodyColor)
             }
         }
@@ -514,8 +503,6 @@ private fun CommandBlock(segment: MessageSegment, isUser: Boolean) {
     val c = Apple.colors
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
-    var running by remember { mutableStateOf(false) }
-    val chatVm: ChatViewModel = viewModel()
 
     Row(
         Modifier
@@ -538,49 +525,6 @@ private fun CommandBlock(segment: MessageSegment, isUser: Boolean) {
             tint = if (isUser) Color.White.copy(alpha = 0.8f) else c.blue,
             modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, segment.content); copied = true }
         )
-        Spacer(Modifier.width(10.dp))
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(c.blue.copy(alpha = 0.15f))
-                .clickable(enabled = !running && !chatVm.uiState.value.isGenerating) {
-                    running = true
-                    chatVm.runCommandDirect(segment.content)
-                }
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.PlayArrow, null, tint = c.blue, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(3.dp))
-                Text(if (running) "Running" else "Run", color = c.blue, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusRow(content: String, isUser: Boolean) {
-    val c = Apple.colors
-    val ok = content.contains("✅") || content.contains("✓")
-    if (isUser) {
-        Text(content, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-    } else {
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background((if (ok) c.green else c.red).copy(alpha = 0.12f))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                if (ok) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
-                null,
-                tint = if (ok) c.green else c.red,
-                modifier = Modifier.size(15.dp)
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(content, color = if (ok) c.green else c.red, style = MaterialTheme.typography.bodyMedium)
-        }
     }
 }
 
@@ -607,31 +551,46 @@ private fun LinkText(text: String, baseColor: Color) {
     Text(annotated, style = MaterialTheme.typography.bodyLarge.copy(color = baseColor))
 }
 
-// ── Typing indicator ─────────────────────────────────────────
+// ── Input status bar ─────────────────────────────────────────
 
 @Composable
-private fun TypingBubble() {
+private fun InputStatusBar(planMode: Boolean, isGenerating: Boolean, status: String) {
     val c = Apple.colors
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Row(
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val col = if (planMode) c.orange else c.blue
+        Box(
             Modifier
-                .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))
-                .background(c.aiBubble)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .clip(RoundedCornerShape(6.dp))
+                .background(col.copy(alpha = 0.15f))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
         ) {
-            val phase by produceState(0) {
-                while (true) { kotlinx.coroutines.delay(350); value = (value + 1) % 3 }
-            }
-            repeat(3) { i ->
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(c.secondaryLabel.copy(alpha = if (i == phase) 1f else 0.35f))
-                )
-            }
+            Text(
+                if (planMode) "Plan" else "Build",
+                color = col,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        if (isGenerating) {
+            Spacer(Modifier.width(10.dp))
+            CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp, color = col)
+            Spacer(Modifier.width(8.dp))
+            val label = TextUtils.stripEmoji(status)
+                .lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }
+                ?: "Kaam kar raha hoon..."
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = c.secondaryLabel,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -1052,7 +1011,7 @@ private fun copyToClipboard(context: android.content.Context, text: String) {
     cm.setPrimaryClip(android.content.ClipData.newPlainText("featurestic", text))
 }
 
-enum class SegmentType { NORMAL, CODE, COMMAND, STATUS }
+enum class SegmentType { NORMAL, CODE, COMMAND }
 data class MessageSegment(val type: SegmentType, val content: String, val language: String = "")
 
 fun parseMessageSegments(text: String): List<MessageSegment> {
@@ -1062,7 +1021,7 @@ fun parseMessageSegments(text: String): List<MessageSegment> {
     val currentNormal = StringBuilder()
 
     fun flushNormal() {
-        val s = currentNormal.toString().trim()
+        val s = TextUtils.stripEmoji(currentNormal.toString()).trim()
         if (s.isNotEmpty()) segments.add(MessageSegment(SegmentType.NORMAL, s))
         currentNormal.clear()
     }
@@ -1084,10 +1043,6 @@ fun parseMessageSegments(text: String): List<MessageSegment> {
                 flushNormal()
                 val cmd = line.replace(Regex("""\[TERMUX:(.*?)\]""")) { it.groupValues[1] }.trim()
                 segments.add(MessageSegment(SegmentType.COMMAND, cmd))
-            }
-            line.contains("✅") || line.contains("❌") -> {
-                flushNormal()
-                segments.add(MessageSegment(SegmentType.STATUS, line.trim()))
             }
             else -> currentNormal.appendLine(line)
         }

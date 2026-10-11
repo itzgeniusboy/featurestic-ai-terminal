@@ -122,7 +122,7 @@ fun CrashScreen(crashLog: String, onCopy: () -> Unit, onRestart: () -> Unit) {
         topBar = {
             @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
-                title = { Text("💥 App Crash Report") },
+                title = { Text("App Crash Report") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF1A0000)
                 )
@@ -138,7 +138,7 @@ fun CrashScreen(crashLog: String, onCopy: () -> Unit, onRestart: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "❌ App crash ho gaya. Niche error copy karo aur Claude ko bhejo.",
+                text = "App crash ho gaya. Niche error copy karo aur Claude ko bhejo.",
                 color = Color(0xFFFF6B6B),
                 fontSize = 14.sp
             )
@@ -148,10 +148,10 @@ fun CrashScreen(crashLog: String, onCopy: () -> Unit, onRestart: () -> Unit) {
                     onClick = { onCopy(); copied = true },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
                 ) {
-                    Text(if (copied) "✅ Copied!" else "📋 Error Copy Karo")
+                    Text(if (copied) "Copied!" else "Error Copy Karo")
                 }
                 OutlinedButton(onClick = onRestart) {
-                    Text("🔄 Restart", color = Color.White)
+                    Text("Restart", color = Color.White)
                 }
             }
 

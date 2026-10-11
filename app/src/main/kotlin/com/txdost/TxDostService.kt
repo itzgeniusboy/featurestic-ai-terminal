@@ -119,7 +119,7 @@ class TxDostService : Service() {
         currentAiJob?.cancel()
         currentAiJob = null
         _isGenerating.value = false
-        sendNotification("⏹️ Task Stopped", "AI task rok diya gaya")
+        sendNotification("Task Stopped", "AI task rok diya gaya")
     }
 
     fun setCurrentAiJob(job: Job) { currentAiJob = job }
@@ -139,7 +139,7 @@ class TxDostService : Service() {
         val p = ManagedProcess(id = id, name = name, command = command, logFile = logFile, pid = pid)
         _processes.update { it + p }
         updateOngoingNotification()
-        sendNotification("🚀 Started: $name", "Background mein chal raha hai")
+        sendNotification("Started: $name", "Background mein chal raha hai")
     }
 
     fun stopProcess(id: String) {
@@ -157,7 +157,7 @@ class TxDostService : Service() {
             }
 
             _processes.update { list -> list.filter { it.id != id } }
-            sendNotification("⏹️ Stopped: ${proc.name}", "Process band kar diya")
+            sendNotification("Stopped: ${proc.name}", "Process band kar diya")
             updateOngoingNotification()
         }
     }
@@ -204,28 +204,12 @@ class TxDostService : Service() {
                 }
                 val result = termux.runCommandAndGetOutput(checkCmd, 5)
                 val nowRunning = result.output.contains("RUNNING")
+                val wasRunning = proc.isRunning
                 _processes.update { list ->
                     list.map { if (it.id == proc.id) it.copy(isRunning = nowRunning) else it }
                 }
-            }
-        }
-    }
-
-    fun checkProcessStatus() {
-        serviceScope.launch {
-            val termux = TermuxBridge(applicationContext)
-            _processes.value.forEach { proc ->
-                val checkCmd = if (proc.pid > 0) {
-                    "kill -0 ${proc.pid} 2>/dev/null && echo RUNNING || echo STOPPED"
-                } else {
-                    "pgrep -f '${proc.command.take(20)}' && echo RUNNING || echo STOPPED"
-                }
-                val result = termux.runCommandAndGetOutput(checkCmd, 5)
-                if (result.output.contains("STOPPED")) {
-                    _processes.update { list ->
-                        list.map { if (it.id == proc.id) it.copy(isRunning = false) else it }
-                    }
-                    sendNotification("❌ Stopped: ${proc.name}", "Process unexpectedly stopped. Log check karo.")
+                if (wasRunning && !nowRunning) {
+                    sendNotification("Stopped: ${proc.name}", "Process ruk gaya. Log check karo.")
                 }
             }
         }
@@ -290,14 +274,14 @@ class TxDostService : Service() {
                 val historyManager = ChatHistoryManager(applicationContext)
                 val researchMsg = ChatMessage(
                     role = "assistant",
-                    content = "\uD83D\uDCC5 **Scheduled Research Complete!**\n\n**Topic:** ${task.topic}\n\n---\n\n$result"
+                    content = "**Scheduled Research Complete!**\n\n**Topic:** ${task.topic}\n\n---\n\n$result"
                 )
                 val existing = historyManager.loadMessages(task.convId)
                 historyManager.saveMessages(task.convId, existing + researchMsg)
                 historyManager.touchConversation(task.convId)
 
                 sendNotification(
-                    title  = "\u2705 Research Ready!",
+                    title  = "Research Ready!",
                     message = "${task.topic.take(35)} — Tap karke dekho",
                     convId = task.convId
                 )
@@ -308,10 +292,10 @@ class TxDostService : Service() {
                 try {
                     val hm = ChatHistoryManager(applicationContext)
                     val errMsg = ChatMessage("assistant",
-                        "\u274C **Research Failed**\n\nTopic: ${task.topic}\nError: ${e.message}")
+                        "**Research Failed**\n\nTopic: ${task.topic}\nError: ${e.message}")
                     hm.saveMessages(task.convId, hm.loadMessages(task.convId) + errMsg)
                 } catch (_: Exception) {}
-                sendNotification("\u274C Research Failed",
+                sendNotification("Research Failed",
                     "${task.topic.take(30)}: ${e.message?.take(40) ?: "error"}",
                     convId = task.convId)
             } finally {
@@ -362,7 +346,7 @@ class TxDostService : Service() {
         }
 
         try {
-            NotificationManagerCompat.from(this).notify(System.currentTimeMillis().toInt(), builder.build())
+            NotificationManagerCompat.from(this).notify((title + "|" + message).hashCode(), builder.build())
         } catch (e: SecurityException) { /* notification permission nahi hai */ }
     }
 

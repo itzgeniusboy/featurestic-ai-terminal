@@ -364,7 +364,8 @@ fun AppleSegmentedControl(
     options: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectedColors: List<Color>? = null
 ) {
     val c = Apple.colors
     Row(
@@ -376,11 +377,12 @@ fun AppleSegmentedControl(
     ) {
         options.forEachIndexed { index, option ->
             val selected = index == selectedIndex
+            val selColor = selectedColors?.getOrNull(index) ?: c.blue
             Box(
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(7.dp))
-                    .let { if (selected) it.background(c.tertiaryBg) else it }
+                    .let { if (selected) it.background(selColor) else it }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -391,7 +393,7 @@ fun AppleSegmentedControl(
                 Text(
                     option,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = c.label,
+                    color = if (selected) Color.White else c.label,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                 )
             }
@@ -413,6 +415,61 @@ fun AppleScrollingChips(
     ) {
         items.forEach { (text, active) -> AppleBadge(text, active) }
     }
+}
+
+// ── Menus (iOS-style) ────────────────────────────────────────
+
+@Composable
+fun AppleMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val c = Apple.colors
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier.widthIn(min = 220.dp),
+        shape = RoundedCornerShape(14.dp),
+        containerColor = c.secondaryBg,
+        tonalElevation = 0.dp,
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(vertical = 6.dp), content = content)
+    }
+}
+
+@Composable
+fun AppleMenuRow(
+    text: String,
+    icon: ImageVector? = null,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    val c = Apple.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(icon, null, tint = if (danger) c.red else c.blue, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(12.dp))
+        }
+        Text(text, color = if (danger) c.red else c.label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+fun AppleMenuDivider() {
+    HorizontalDivider(
+        color = Apple.colors.separator,
+        thickness = 0.5.dp,
+        modifier = Modifier.padding(vertical = 4.dp)
+    )
 }
 
 @Composable

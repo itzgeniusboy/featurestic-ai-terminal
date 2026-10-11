@@ -79,6 +79,7 @@ fun SettingsScreen(
     val tavilyStored by remember { prefs.tavilyApiKey }.collectAsState(initial = "")
     val firecrawlStored by remember { prefs.firecrawlApiKey }.collectAsState(initial = "")
     val themeStored by remember { prefs.themeMode }.collectAsState(initial = "system")
+    val showCommandsStored by remember { prefs.showCommands }.collectAsState(initial = true)
 
     var systemPrompt by remember { mutableStateOf("") }
     var searchProvider by remember { mutableStateOf("DUCKDUCKGO") }
@@ -218,7 +219,7 @@ fun SettingsScreen(
             extLog = "Checking..."
             val r = bridge.runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NO")
             extInstalled = r.output.contains("/opencode")
-            extLog = if (extInstalled == true) "Installed ✓" else "Not installed"
+            extLog = if (extInstalled == true) "Installed" else "Not installed"
             extBusy = false
         }
     }
@@ -231,7 +232,7 @@ fun SettingsScreen(
             bridge.runCommandAndGetOutput("npm install -g opencode-termux", 600)
             val r = bridge.runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NO")
             extInstalled = r.output.contains("/opencode")
-            extLog = if (extInstalled == true) "Installed ✓" else "Install finished — not detected yet. Try Check."
+            extLog = if (extInstalled == true) "Installed" else "Install finished — not detected yet. Try Check."
             extBusy = false
         }
     }
@@ -417,6 +418,14 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            AppleSectionHeader("Chat")
+            AppleSwitchRow(
+                title = "Terminal commands dikhao",
+                subtitle = "Off karne par sirf jawab dikhega, command boxes chhup jayenge",
+                checked = showCommandsStored,
+                onCheckedChange = { scope.launch { prefs.saveShowCommands(it) } }
+            )
 
             AppleSectionHeader("Appearance")
             Column(Modifier.padding(horizontal = 16.dp)) {

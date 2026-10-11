@@ -71,7 +71,7 @@ class TermuxBridge(private val context: Context) {
         onOutput: (newLines: List<String>) -> Unit
     ): CommandResult = withContext(Dispatchers.IO) {
         // Progress simulation — user ko pata chale kuch ho raha hai
-        onOutput(listOf("⚡ Running: $command"))
+        onOutput(listOf("Running: $command"))
 
         try {
             val body = JSONObject()
@@ -250,13 +250,13 @@ class TermuxBridge(private val context: Context) {
 
             // Trim to a compact summary — AI gets max 6 lines, not 500
             val trimmedOutput = if (success) {
-                "✅ $packageName installed successfully"
+                "$packageName installed successfully"
             } else {
                 val errorLines = rawOutput.lines()
                     .filter { it.contains("error", ignoreCase = true) || it.contains("unable", ignoreCase = true) || it.startsWith("E:") }
                     .take(4)
                     .joinToString("\n")
-                "❌ $packageName install failed\n${errorLines.ifEmpty { "Check: cat /tmp/pkg_install_${packageName}.log" }}"
+                "$packageName install failed\n${errorLines.ifEmpty { "Check: cat /tmp/pkg_install_${packageName}.log" }}"
             }
 
             CommandResult(output = trimmedOutput, exitCode = if (success) 0 else 1, success = success)
