@@ -125,7 +125,12 @@ class LlmClient {
             val response = call.execute()
             if (!response.isSuccessful) {
                 val err = response.body?.string() ?: "No error body"
-                emit("[ERROR] HTTP ${response.code}: ${err.take(400)}")
+                if (err.contains("FreeTierError", true) ||
+                    err.contains("free tier can only be used", true)) {
+                    emit("[ERROR] OpenCode Zen ke free models sirf official OpenCode app ke andar chalte hain — kisi doosre app se allowed nahi. Koi doosra free provider (OpenRouter/Groq/Gemini) chuno, ya apni OpenCode Zen key se PAID model use karo.")
+                } else {
+                    emit("[ERROR] HTTP ${response.code}: ${err.take(400)}")
+                }
                 return@flow
             }
             val reader = response.body?.source()?.inputStream()?.bufferedReader()
