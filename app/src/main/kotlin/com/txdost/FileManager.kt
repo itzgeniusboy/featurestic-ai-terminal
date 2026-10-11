@@ -16,6 +16,13 @@ class FileManager(private val context: Context) {
 
     fun getRootPath(): String = rootDir.absolutePath
 
+    // Path traversal rok — sirf workspace ke andar allow
+    private fun resolveSafe(relativePath: String): File? = try {
+        val root = rootDir.canonicalFile
+        val f = File(root, relativePath).canonicalFile
+        if (f.path == root.path || f.path.startsWith(root.path + File.separator)) f else null
+    } catch (e: Exception) { null }
+
     // List files and folders
     fun listFiles(relativePath: String = ""): List<FileItem> {
         val dir = if (relativePath.isEmpty()) rootDir else File(rootDir, relativePath)
@@ -35,7 +42,7 @@ class FileManager(private val context: Context) {
     // Create a folder
     fun createFolder(relativePath: String): Result<String> {
         return try {
-            val folder = File(rootDir, relativePath)
+            val folder = resolveSafe(relativePath) ?: return Result.failure(Exception("Invalid path"))
             if (folder.mkdirs()) {
                 Result.success("Folder created: $relativePath")
             } else if (folder.exists()) {
@@ -51,7 +58,7 @@ class FileManager(private val context: Context) {
     // Create / write a file
     fun writeFile(relativePath: String, content: String): Result<String> {
         return try {
-            val file = File(rootDir, relativePath)
+            val file = resolveSafe(relativePath) ?: return Result.failure(Exception("Invalid path"))
             file.parentFile?.mkdirs()
             file.writeText(content)
             Result.success("File saved: $relativePath")
@@ -63,7 +70,7 @@ class FileManager(private val context: Context) {
     // Read file content
     fun readFile(relativePath: String): Result<String> {
         return try {
-            val file = File(rootDir, relativePath)
+            val file = resolveSafe(relativePath) ?: return Result.failure(Exception("Invalid path"))
             if (!file.exists()) return Result.failure(Exception("File not found: $relativePath"))
             if (!file.isFile) return Result.failure(Exception("Not a file: $relativePath"))
             if (file.length() > 500_000) return Result.failure(Exception("File too large (>500KB)"))
@@ -76,7 +83,7 @@ class FileManager(private val context: Context) {
     // Delete file or folder
     fun delete(relativePath: String): Result<String> {
         return try {
-            val file = File(rootDir, relativePath)
+            val file = resolveSafe(relativePath) ?: return Result.failure(Exception("Invalid path"))
             if (!file.exists()) return Result.failure(Exception("Not found: $relativePath"))
             if (file.deleteRecursively()) {
                 Result.success("Deleted: $relativePath")
@@ -91,7 +98,9 @@ class FileManager(private val context: Context) {
     // Rename a file or folder
     fun rename(oldPath: String, newName: String): Result<String> {
         return try {
-            val old = File(rootDir, oldPath)
+            val old = resolveSafe(oldPath) ?: return Result.failure(Exception("Invalid path"))
+            if (newName.contains('/') || newName.contains('\\') || newName.contains(".."))
+                return Result.failure(Exception("Invalid name"))
             val new = File(old.parentFile, newName)
             if (old.renameTo(new)) {
                 Result.success("Renamed to: $newName")

@@ -221,6 +221,9 @@ class TermuxBridge(private val context: Context) {
     // Output is trimmed to ~5 lines so AI context is not flooded
     suspend fun installPackage(packageName: String): CommandResult = withContext(Dispatchers.IO) {
         try {
+            // Safety: sirf valid package names allow karo (command injection rok)
+            if (!packageName.matches(Regex("[A-Za-z0-9._+\\-]+")))
+                return@withContext CommandResult("Invalid package name: $packageName", -1, false)
             // -y = auto confirm; pipe to log file; only tail last 5 lines for progress
             // At end, emit a clear success/failure marker so we can detect it reliably
             val silentCmd = "DEBIAN_FRONTEND=noninteractive pkg install -y $packageName " +

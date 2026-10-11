@@ -152,7 +152,7 @@ class TxDostService : Service() {
                 termux.runCommandAndGetOutput("kill -TERM -${proc.pid} 2>/dev/null; kill -TERM ${proc.pid} 2>/dev/null; sleep 1; kill -KILL ${proc.pid} 2>/dev/null; echo done", 10)
             } else {
                 // Fallback: command name se pkill (kam reliable)
-                val cmdPattern = proc.command.trim().take(40)
+                val cmdPattern = proc.command.trim().take(40).replace("'", "")
                 termux.runCommandAndGetOutput("pkill -f '$cmdPattern' 2>/dev/null; sleep 1; pkill -9 -f '$cmdPattern' 2>/dev/null; echo done", 10)
             }
 
@@ -185,9 +185,15 @@ class TxDostService : Service() {
             val termux = TermuxBridge(applicationContext)
             val endpoint = if (proc.autoRestart) "/watchdog_register" else "/watchdog_remove"
             val body = if (proc.autoRestart) {
-                """{"proc_id":"${proc.id}","command":"${proc.command}","logfile":"${proc.logFile}","pid":${proc.pid},"auto_restart":true}"""
+                org.json.JSONObject()
+                    .put("proc_id", proc.id)
+                    .put("command", proc.command)
+                    .put("logfile", proc.logFile)
+                    .put("pid", proc.pid)
+                    .put("auto_restart", true)
+                    .toString()
             } else {
-                """{"proc_id":"${proc.id}"}"""
+                org.json.JSONObject().put("proc_id", proc.id).toString()
             }
             termux.postJson(endpoint, body)
         }

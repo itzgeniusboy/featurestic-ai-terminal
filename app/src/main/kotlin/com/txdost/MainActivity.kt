@@ -60,9 +60,9 @@ class MainActivity : ComponentActivity() {
             }
             FeaturesticTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    // Update gate: naya version ho to app khulne se pehle update screen
+                    UpdateHost {
                         AppNavigation(initialConvId = convIdFromNotif)
-                        UpdateHost()
                     }
                 }
             }

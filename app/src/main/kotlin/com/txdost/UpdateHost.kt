@@ -5,64 +5,135 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import com.txdost.ui.components.AppleAlertDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+private sealed interface UpdateStatus {
+    data object Checking : UpdateStatus
+    data object Open : UpdateStatus
+    data class Required(val info: UpdateInfo) : UpdateStatus
+    data class Downloading(val info: UpdateInfo) : UpdateStatus
+    data class Failed(val info: UpdateInfo?, val message: String) : UpdateStatus
+}
+
 /**
- * Checks GitHub Releases on launch and offers a one-tap self-update.
- * Relies on the CI release carrying `version.json` + `app-debug.apk`,
- * and on a stable signing key so the update installs over this build.
+ * Blocking update gate. App khulte hi check hota hai; naya version mile to
+ * normal UI ki jagah "Update" screen dikhti hai. Net na ho / check fail ho to
+ * app normal khul jata hai (brick nahi hota).
  */
 @Composable
-fun UpdateHost() {
+fun UpdateHost(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var update by remember { mutableStateOf<UpdateInfo?>(null) }
-    var dismissed by remember { mutableStateOf(false) }
-    var downloading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Checking) }
 
     LaunchedEffect(Unit) {
         val info = withContext(Dispatchers.IO) { UpdateChecker.check() }
-        if (info != null) update = info
+        status = if (info != null) UpdateStatus.Required(info) else UpdateStatus.Open
     }
 
-    val current = update
-    if (current != null && !dismissed) {
-        AppleAlertDialog(
-            title = "Update available",
-            onDismiss = { dismissed = true },
-            confirmText = if (downloading) "Downloading..." else "Update now",
-            onConfirm = {
-                if (!downloading) {
-                    downloading = true
-                    error = null
-                    scope.launch {
-                        try {
-                            val file = withContext(Dispatchers.IO) { UpdateChecker.download(context, current.apkUrl) }
-                            installApk(context, file)
-                            dismissed = true
-                        } catch (e: Exception) {
-                            error = e.message ?: "Download failed"
-                        } finally {
-                            downloading = false
+    when (val s = status) {
+        is UpdateStatus.Open -> content()
+
+        is UpdateStatus.Checking -> UpdateGate(
+            title = "Featurestic AI",
+            message = "Update check kar raha hoon...",
+            showSpinner = true
+        )
+
+        is UpdateStatus.Required -> UpdateGate(
+            title = "Update zaroori hai",
+            message = "Naya version ${s.info.versionName} aa gaya hai. App use karne ke liye pehle update karo.",
+            buttonText = "Update karo",
+            onButton = {
+                status = UpdateStatus.Downloading(s.info)
+                scope.launch {
+                    try {
+                        val file = withContext(Dispatchers.IO) {
+                            UpdateChecker.download(context, s.info.apkUrl, s.info.sha256)
                         }
+                        installApk(context, file)
+                        status = UpdateStatus.Open
+                    } catch (e: Exception) {
+                        status = UpdateStatus.Failed(s.info, e.message ?: "Download fail")
                     }
                 }
-            },
-            dismissText = "Later"
+            }
+        )
+
+        is UpdateStatus.Downloading -> UpdateGate(
+            title = "Download ho raha hai...",
+            message = "Ruko, update download karke installer kholenge.",
+            showSpinner = true
+        )
+
+        is UpdateStatus.Failed -> UpdateGate(
+            title = "Update fail hua",
+            message = s.message,
+            buttonText = if (s.info != null) "Dobara try karo" else "Aage badho",
+            onButton = {
+                status = if (s.info != null) UpdateStatus.Required(s.info) else UpdateStatus.Open
+            }
+        )
+    }
+}
+
+@Composable
+private fun UpdateGate(
+    title: String,
+    message: String,
+    showSpinner: Boolean = false,
+    buttonText: String? = null,
+    onButton: (() -> Unit)? = null
+) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier.fillMaxSize().padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
             Text(
-                if (error != null) "Download fail: $error"
-                else "Naya version ${current.versionName} aa gaya hai. Update karke install karo."
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
             )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (showSpinner) {
+                Spacer(Modifier.height(24.dp))
+                CircularProgressIndicator()
+            }
+            if (buttonText != null && onButton != null) {
+                Spacer(Modifier.height(24.dp))
+                Button(onClick = onButton) { Text(buttonText) }
+            }
         }
     }
 }

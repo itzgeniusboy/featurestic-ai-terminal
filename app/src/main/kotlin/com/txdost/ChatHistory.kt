@@ -25,17 +25,29 @@ data class Conversation(
 
 class ChatHistoryManager(private val context: Context) {
 
+    private val ioLock = Any()
+
     private val historyDir: File by lazy {
         File(context.filesDir, "txdost_history").also { it.mkdirs() }
     }
 
     private val indexFile: File get() = File(historyDir, "index.json")
 
+    // Atomic write: temp file likh ke rename — crash pe adhoora/kharaab file nahi
+    private fun atomicWrite(target: File, content: String) {
+        val tmp = File(target.parentFile, "${target.name}.tmp")
+        tmp.writeText(content)
+        if (!tmp.renameTo(target)) {
+            target.writeText(content)
+            tmp.delete()
+        }
+    }
+
     // ── Index read/write ─────────────────────────────────────
 
-    fun getAllConversations(): List<Conversation> {
-        if (!indexFile.exists()) return emptyList()
-        return try {
+    fun getAllConversations(): List<Conversation> = synchronized(ioLock) {
+        if (!indexFile.exists()) return@synchronized emptyList()
+        try {
             val arr = JSONArray(indexFile.readText())
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
@@ -48,11 +60,32 @@ class ChatHistoryManager(private val context: Context) {
                 )
             }.sortedWith(compareByDescending<Conversation> { it.pinned }.thenByDescending { it.updatedAt })
         } catch (e: Exception) {
-            emptyList()
+            // Index kharaab — conv files se dobara banao, wipe mat karo
+            rebuildIndexFromFiles()
         }
     }
 
-    private fun saveIndex(conversations: List<Conversation>) {
+    private fun rebuildIndexFromFiles(): List<Conversation> {
+        val convs = historyDir.listFiles { f ->
+            f.name.startsWith("conv_") && f.name.endsWith(".json")
+        }?.mapNotNull { f ->
+            val id = f.name.removePrefix("conv_").removeSuffix(".json")
+            try {
+                val msgs = loadMessages(id)
+                Conversation(
+                    id        = id,
+                    title     = msgs.firstOrNull { it.role == "user" }?.content?.take(40) ?: "Recovered chat",
+                    createdAt = f.lastModified(),
+                    updatedAt = f.lastModified()
+                )
+            } catch (e: Exception) { null }
+        } ?: emptyList()
+        val sorted = convs.sortedByDescending { it.updatedAt }
+        saveIndex(sorted)
+        return sorted
+    }
+
+    private fun saveIndex(conversations: List<Conversation>) = synchronized(ioLock) {
         val arr = JSONArray()
         conversations.forEach { conv ->
             arr.put(JSONObject().apply {
@@ -63,7 +96,7 @@ class ChatHistoryManager(private val context: Context) {
                 put("pinned",    conv.pinned)
             })
         }
-        indexFile.writeText(arr.toString())
+        try { atomicWrite(indexFile, arr.toString()) } catch (e: Exception) { }
     }
 
     // ── Conversation CRUD ────────────────────────────────────
@@ -86,10 +119,10 @@ class ChatHistoryManager(private val context: Context) {
         return conv
     }
 
-    fun loadMessages(convId: String): List<ChatMessage> {
+    fun loadMessages(convId: String): List<ChatMessage> = synchronized(ioLock) {
         val file = File(historyDir, "conv_$convId.json")
-        if (!file.exists()) return emptyList()
-        return try {
+        if (!file.exists()) return@synchronized emptyList()
+        try {
             val arr = JSONArray(file.readText())
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
@@ -103,11 +136,12 @@ class ChatHistoryManager(private val context: Context) {
                 )
             }
         } catch (e: Exception) {
+            // Corrupt file — khaali do, par file delete/mat likho (recovery ke liye rahe)
             emptyList()
         }
     }
 
-    fun saveMessages(convId: String, messages: List<ChatMessage>) {
+    fun saveMessages(convId: String, messages: List<ChatMessage>) = synchronized(ioLock) {
         val arr = JSONArray()
         messages.forEach { msg ->
             arr.put(JSONObject().apply {
@@ -119,7 +153,7 @@ class ChatHistoryManager(private val context: Context) {
                 msg.fileName?.let { put("fileName", it) }
             })
         }
-        File(historyDir, "conv_$convId.json").writeText(arr.toString())
+        try { atomicWrite(File(historyDir, "conv_$convId.json"), arr.toString()) } catch (e: Exception) { }
     }
 
     fun updateConversationTitle(convId: String, newTitle: String) {

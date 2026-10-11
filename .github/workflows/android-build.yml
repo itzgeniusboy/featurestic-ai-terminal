@@ -27,26 +27,28 @@ jobs:
       - name: Decode signing keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/featurestic.jks"
 
-      - name: Build debug APK
+      - name: Build release APK
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/featurestic.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: featurestic-ai-terminal-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: featurestic-ai-terminal-release
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Prepare update metadata
         run: |
           VC=$(grep -oP 'versionCode \K[0-9]+' app/build.gradle)
           VN=$(grep -oP "versionName '\K[^']+" app/build.gradle)
-          printf '{"versionCode":%s,"versionName":"%s"}' "$VC" "$VN" > version.json
+          cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
+          SHA=$(sha256sum ./app-release.apk | cut -d' ' -f1)
+          printf '{"versionCode":%s,"versionName":"%s","sha256":"%s"}' "$VC" "$VN" "$SHA" > version.json
           echo "version.json ->" && cat version.json
 
       - name: Publish rolling "latest" release
@@ -54,8 +56,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete ci-latest --yes --cleanup-tag 2>/dev/null || true
-          cp app/build/outputs/apk/debug/app-debug.apk ./app-debug.apk
-          gh release create ci-latest ./app-debug.apk ./version.json \
+          gh release create ci-latest ./app-release.apk ./version.json \
             --title "Latest build ($(date -u +%Y-%m-%d))" \
             --notes "Auto-build from ${{ github.sha }}" \
             --latest

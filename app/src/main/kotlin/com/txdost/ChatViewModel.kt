@@ -95,6 +95,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     // Current AI job — direct cancel ke liye ViewModel mein rakho
     private var currentAiJob: Job? = null
 
+    // Generation ke waqt ka convId — reply SAHI conversation me save ho
+    private var generatingConvId: String? = null
+
+    private fun cancelActiveGeneration() {
+        currentAiJob?.cancel()
+        currentAiJob = null
+        txService?.setGenerating(false)
+        generatingConvId = null
+        if (_uiState.value.isGenerating)
+            _uiState.update { it.copy(isGenerating = false, streamingText = "") }
+    }
+
     // Service connection
     private var txService: TxDostService? = null
     private val serviceConnection = object : ServiceConnection {
@@ -391,6 +403,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         currentAiJob?.cancel() // purana job cancel karo agar chal raha ho
+        generatingConvId = _uiState.value.activeConvId
         val job = viewModelScope.launch {
             val termuxLive = termuxBridge.isConnected()
             if (termuxLive != _uiState.value.termuxConnected)
@@ -453,6 +466,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 return@launch
             } catch (e: kotlinx.coroutines.CancellationException) {
+                return@launch
+            } catch (e: Exception) {
+                // Network/parse crash — app band na ho
+                _uiState.update { it.copy(isGenerating = false, streamingText = "",
+                    error = "Kuch galat ho gaya: ${e.message ?: "network error"}") }
                 return@launch
             }
 
@@ -571,6 +589,7 @@ RULES:
                             if (!token.startsWith("[ERROR]")) retrySb.append(token)
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) { return@launch }
+                      catch (e: Exception) { /* retry fail — neeche fallback reply dikhega */ }
 
                     val retryResponse = retrySb.toString()
 
@@ -707,6 +726,8 @@ Now answer the user based on these ACTUAL real-time results.
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             return
+        } catch (e: Exception) {
+            /* search-summary fail — neeche fallback finalText use hoga */
         }
 
         val finalText = finalSb.toString().ifEmpty {
@@ -817,6 +838,8 @@ Now answer the user based on these ACTUAL real-time results.
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             return
+        } catch (e: Exception) {
+            /* plan summary fail — neeche fallback cleaned text use hoga */
         }
 
         val finalText = cleanTags(sb.toString().ifBlank { cleaned }).ifEmpty { cleaned }
@@ -1216,14 +1239,20 @@ Now answer the user based on these ACTUAL real-time results.
         _uiState.update { it.copy(streamingText = "Summarizing...") }
         val finalSb = StringBuilder()
 
-        llm.chatStream(
-            apiKey = currentApiKey,
-            model = currentModel,
-            messages = messagesWithResult,
-            systemPrompt = buildSystemPrompt(true, "", ""),
-            fileContext = ""
-        ).collect { token ->
-            if (!token.startsWith("[ERROR]")) finalSb.append(token)
+        try {
+            llm.chatStream(
+                apiKey = currentApiKey,
+                model = currentModel,
+                messages = messagesWithResult,
+                systemPrompt = buildSystemPrompt(true, "", ""),
+                fileContext = ""
+            ).collect { token ->
+                if (!token.startsWith("[ERROR]")) finalSb.append(token)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            return
+        } catch (e: Exception) {
+            /* summary fail — neeche fallback finalText use hoga */
         }
 
         val finalText = finalSb.toString().ifEmpty {
@@ -1247,7 +1276,9 @@ Now answer the user based on these ACTUAL real-time results.
 
     // ── Helper: conversation save + title update ─────────────────
     private fun saveConversation(msgs: List<ChatMessage>) {
-        val convId = _uiState.value.activeConvId
+        // Generation ke waqt ka convId use karo — user switch kar chuka ho to bhi sahi jagah save ho
+        val convId = generatingConvId ?: _uiState.value.activeConvId
+        generatingConvId = null
         if (convId.isEmpty()) return
         viewModelScope.launch {
             historyManager.saveMessages(convId, msgs)
@@ -1297,6 +1328,7 @@ Now answer the user based on these ACTUAL real-time results.
         )
 
     fun clearChat() {
+        cancelActiveGeneration()
         _uiState.update { it.copy(messages = emptyList(), streamingText = "", error = null) }
         val convId = _uiState.value.activeConvId
         if (convId.isNotEmpty()) {
@@ -1377,6 +1409,7 @@ Now answer the user based on these ACTUAL real-time results.
     // ── History Functions ────────────────────────────────────
 
     fun newConversation() {
+        cancelActiveGeneration()
         viewModelScope.launch {
             val conv = historyManager.createConversation("New Chat")
             prefs.saveActiveConvId(conv.id)
@@ -1398,6 +1431,8 @@ Now answer the user based on these ACTUAL real-time results.
             _uiState.update { it.copy(showHistoryDrawer = false) }
             return
         }
+        // Purani generation rok do — warna reply galat conv me chala jayega
+        cancelActiveGeneration()
         viewModelScope.launch {
             val msgs = historyManager.loadMessages(convId)
             prefs.saveActiveConvId(convId)
@@ -1414,6 +1449,7 @@ Now answer the user based on these ACTUAL real-time results.
     }
 
     fun deleteConversation(convId: String) {
+        if (convId == _uiState.value.activeConvId) cancelActiveGeneration()
         viewModelScope.launch {
             historyManager.deleteConversation(convId)
             val current = _uiState.value.activeConvId
