@@ -1,9 +1,11 @@
 package com.txdost
 
+import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -83,7 +85,7 @@ fun UpdateHost(content: @Composable () -> Unit) {
                     val saved = withContext(Dispatchers.IO) { exportApkToDownloads(context, file) }
                     status = UpdateStatus.SignatureMismatch(info, saved)
                 } else if (canInstall(context)) {
-                    startInstaller(context, file)
+                    installApk(context, file)
                     status = UpdateStatus.Open
                 } else {
                     status = UpdateStatus.NeedPermission(info, file)
@@ -130,7 +132,7 @@ fun UpdateHost(content: @Composable () -> Unit) {
             onButton = {
                 if (canInstall(context)) {
                     try {
-                        startInstaller(context, s.apk)
+                        installApk(context, s.apk)
                         status = UpdateStatus.Open
                     } catch (e: Exception) {
                         status = UpdateStatus.Failed(s.info, e.message ?: "Install fail")
@@ -217,6 +219,40 @@ private fun requestInstallPermission(context: Context) {
             .setData(Uri.parse("package:${context.packageName}"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     )
+}
+
+private fun installApk(context: Context, file: File) {
+    try {
+        installViaSession(context, file)
+    } catch (e: Exception) {
+        startInstaller(context, file)
+    }
+}
+
+/** Modern, reliable self-update via PackageInstaller (avoids installer hangs). */
+private fun installViaSession(context: Context, file: File) {
+    val installer = context.packageManager.packageInstaller
+    val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+        setAppPackageName(context.packageName)
+    }
+    val sessionId = installer.createSession(params)
+    val session = installer.openSession(sessionId)
+    try {
+        session.openWrite("base.apk", 0, file.length()).use { out ->
+            file.inputStream().use { it.copyTo(out) }
+        }
+        val resultIntent = Intent(context, InstallResultReceiver::class.java)
+            .setPackage(context.packageName)
+            .putExtra(PackageInstaller.EXTRA_SESSION_ID, sessionId)
+        val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        else
+            PendingIntent.FLAG_UPDATE_CURRENT
+        val pending = PendingIntent.getBroadcast(context, sessionId, resultIntent, piFlags)
+        session.commit(pending.intentSender)
+    } finally {
+        session.close()
+    }
 }
 
 private fun startInstaller(context: Context, file: File) {

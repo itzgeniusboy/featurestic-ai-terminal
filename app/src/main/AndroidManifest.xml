@@ -67,6 +67,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- In-app self-update result -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
+
         <!-- In-app auto-update: APK shared from cache -->
         <provider
             android:name="androidx.core.content.FileProvider"
