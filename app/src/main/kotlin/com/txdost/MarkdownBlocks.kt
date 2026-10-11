@@ -83,7 +83,8 @@ object MarkdownBlocks {
                 }
                 boldOnlyRe.matches(trimmed) -> {
                     flushPara()
-                    blocks.add(MdBlock(MdType.HEADING, TextUtils.stripEmoji(boldOnlyRe.find(trimmed)!!.groupValues[1].trim()), level = 2))
+                    val t = boldOnlyRe.find(trimmed)!!.groupValues[1].trimEnd(':').trim()
+                    blocks.add(MdBlock(MdType.HEADING, TextUtils.stripEmoji(t), level = 2))
                 }
                 numberedRe.matches(line) -> {
                     flushPara()
