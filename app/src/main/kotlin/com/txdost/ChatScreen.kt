@@ -636,7 +636,7 @@ private fun CommandBlock(block: MdBlock, isUser: Boolean) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(if (isUser) Color.White.copy(alpha = 0.14f) else c.tertiaryFill)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+            .padding(start = 12.dp, end = 8.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -646,11 +646,13 @@ private fun CommandBlock(block: MdBlock, isUser: Boolean) {
             modifier = Modifier.weight(1f)
         )
         Spacer(Modifier.width(8.dp))
-        Icon(
-            Icons.Rounded.ContentCopy,
-            "Copy",
-            tint = if (isUser) Color.White.copy(alpha = 0.8f) else c.blue,
-            modifier = Modifier.size(18.dp).clickable { copyToClipboard(context, block.text); copied = true }
+        Text(
+            if (copied) "Copied" else "Copy",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isUser) Color.White.copy(alpha = 0.85f) else c.blue,
+            modifier = Modifier
+                .clickable { copyToClipboard(context, block.text); copied = true }
+                .padding(horizontal = 4.dp, vertical = 2.dp)
         )
     }
 }

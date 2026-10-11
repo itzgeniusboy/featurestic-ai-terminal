@@ -83,4 +83,34 @@ class MarkdownBlocksTest {
         assertEquals(1, blocks.size)
         assertEquals(MdType.PARAGRAPH, blocks[0].type)
     }
+
+    @Test
+    fun unfencedCodeBecomesCodeBlock() {
+        val reply = "Ye lo function:\n\ndef add(a, b):\n    return a + b\n\nBas itna."
+        val blocks = MarkdownBlocks.parse(reply)
+        val code = blocks.firstOrNull { it.type == MdType.CODE }
+        assertTrue("expected a CODE block", code != null)
+        assertEquals("python", code!!.language)
+        assertTrue(code.text.contains("def add(a, b):"))
+        assertTrue(code.text.contains("return a + b"))
+    }
+
+    @Test
+    fun unfencedCodeSplitByBlankLineIsFused() {
+        val reply = "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b"
+        val blocks = MarkdownBlocks.parse(reply)
+        val codes = blocks.filter { it.type == MdType.CODE }
+        assertEquals(1, codes.size)
+        assertTrue(codes[0].text.contains("def add"))
+        assertTrue(codes[0].text.contains("def sub"))
+    }
+
+    @Test
+    fun normalMultiLineProseStaysParagraph() {
+        val reply = "Ye ek normal reply hai jisme kuch lines hain.\n" +
+            "Aur ye doosri line hai.\nAur ye teesri line hai."
+        val blocks = MarkdownBlocks.parse(reply)
+        assertEquals(1, blocks.size)
+        assertEquals(MdType.PARAGRAPH, blocks[0].type)
+    }
 }

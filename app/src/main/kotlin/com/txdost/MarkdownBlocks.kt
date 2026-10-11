@@ -29,6 +29,57 @@ object MarkdownBlocks {
     private val dividerRe  = Regex("^\\s*([-*_])(?:\\s*\\1){2,}\\s*$")
     private val termuxRe   = Regex("""\[TERMUX:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
 
+    // ── Code "safety net" heuristics (for weak models that forget fences) ──
+    private val codeStartRe = Regex(
+        "^(def|class|import|from|function|const|let|var|fun|val|public|private|protected|static|" +
+            "void|int|float|double|bool|boolean|String|return|if|else|elif|for|while|switch|case|break|" +
+            "continue|try|catch|finally|throw|new|package|using|struct|enum|interface|extends|implements|" +
+            "async|await|export|require|print|printf|puts|echo|sudo|npm|npx|yarn|pip|pip3|docker|git|cd|ls|" +
+            "cat|mkdir|rm|cp|mv|curl|wget|python|python3|node|bash|sh|export|source|set)\\b.*"
+    )
+    private val shebangRe = Regex("^#!.*")
+    private val htmlTagRe = Regex("^</?[A-Za-z][\\w:-]*(\\s|/?>)")
+
+    private fun isCodeLike(line: String): Boolean {
+        val s = line.trimEnd()
+        if (s.isBlank()) return false
+        if (s.length - s.trimStart().length >= 2) return true
+        if (s.endsWith(";") || s.endsWith("{") || s.endsWith("}") || s.endsWith(")")) return true
+        val t = s.trimStart()
+        if (codeStartRe.matches(t)) return true
+        if (shebangRe.matches(t)) return true
+        if (htmlTagRe.containsMatchIn(t)) return true
+        if (t.startsWith("$ ")) return true
+        if (t.contains("=>") || t.contains("->") || t.contains("::")) return true
+        if (t.contains("){") || t.contains("};")) return true
+        return false
+    }
+
+    private fun looksLikeCode(lines: List<String>): Boolean {
+        val nonBlank = lines.filter { it.isNotBlank() }
+        if (nonBlank.size < 2) return false
+        val code = nonBlank.count { isCodeLike(it) }
+        if (nonBlank.size == 2) return code == 2
+        return code * 100 / nonBlank.size >= 70
+    }
+
+    private fun guessLanguage(lines: List<String>): String {
+        val j = lines.joinToString("\n")
+        return when {
+            j.contains("#!") || Regex("(?m)^\\s*\\$\\s").containsMatchIn(j) ||
+                Regex("(?m)^\\s*(cd|ls|cat|mkdir|rm|cp|mv|curl|wget|git|npm|npx|yarn|pip|pip3|sudo|chmod|echo|export)\\b").containsMatchIn(j) -> "shell"
+            Regex("(?m)^\\s*(def|import|from)\\s").containsMatchIn(j) || j.contains("print(") -> "python"
+            j.contains("<?php") -> "php"
+            j.contains("#include") -> "c"
+            Regex("(?m)^\\s*(fun|val)\\s").containsMatchIn(j) -> "kotlin"
+            j.contains("public ") || j.contains("void ") || j.contains("System.out") -> "java"
+            j.contains("console.log") || j.contains("=>") ||
+                Regex("(?m)^\\s*(const|let|function)\\s").containsMatchIn(j) -> "javascript"
+            htmlTagRe.containsMatchIn(j) -> "html"
+            else -> ""
+        }
+    }
+
     /** Parse raw (already tag-cleaned) text into display blocks. */
     fun parse(raw: String): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
@@ -41,6 +92,13 @@ object MarkdownBlocks {
             para.setLength(0)
             if (t.isEmpty()) return
             val single = !t.contains('\n')
+            if (!single) {
+                val paraLines = t.split('\n')
+                if (looksLikeCode(paraLines)) {
+                    blocks.add(MdBlock(MdType.CODE, TextUtils.stripEmoji(t), language = guessLanguage(paraLines)))
+                    return
+                }
+            }
             blocks.add(
                 when {
                     single && t.length in 1..48 && t.endsWith(':') && !t.startsWith("-") ->
@@ -109,7 +167,22 @@ object MarkdownBlocks {
             i++
         }
         flushPara()
-        return blocks
+        return mergeAdjacentCode(blocks)
+    }
+
+    /** Fuse code blocks that end up directly adjacent (e.g. safety-net split by a blank line). */
+    private fun mergeAdjacentCode(blocks: List<MdBlock>): List<MdBlock> {
+        val merged = mutableListOf<MdBlock>()
+        for (b in blocks) {
+            val last = merged.lastOrNull()
+            if (b.type == MdType.CODE && last?.type == MdType.CODE) {
+                merged[merged.size - 1] = last.copy(
+                    text = last.text + "\n" + b.text,
+                    language = last.language.ifEmpty { b.language }
+                )
+            } else merged.add(b)
+        }
+        return merged
     }
 
     /**

@@ -1396,7 +1396,7 @@ Now answer the user based on these ACTUAL real-time results.
         }
 
         val finalText = finalSb.toString().ifEmpty {
-            "$cleanResponse\n\n**Results:**\n```\n$actionResults\n```"
+            cleanResponse.ifEmpty { "Kaam ho gaya." }
         }
         // Debug log — AI ka final response
         addDebugLog(DebugLogType.AI_RECV, "← AI response", finalText.take(200))

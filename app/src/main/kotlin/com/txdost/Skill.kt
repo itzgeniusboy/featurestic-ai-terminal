@@ -54,7 +54,9 @@ object BuiltInSkills {
             id = "plain_text",
             name = "Plain text",
             description = "No markdown, no code fences.",
-            instruction = "Reply in plain text only. Do NOT use markdown, headings, bold, bullet lists, or code fences unless the user explicitly asks.",
+            instruction = "Reply in plain text only. Do NOT use markdown, headings, bold, or bullet lists. " +
+                "Exception: when the user asks for code, put the full code in ONE fenced block (```) on its own " +
+                "lines so it renders as a copyable code box; keep any explanation outside the block in 1-2 plain lines.",
             builtIn = true
         ),
         Skill(
