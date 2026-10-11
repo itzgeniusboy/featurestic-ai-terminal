@@ -348,7 +348,9 @@ private fun MessageBubble(
     onRegenerate: (() -> Unit)? = null
 ) {
     val c = Apple.colors
+    val context = LocalContext.current
     val isUser = message.role == "user"
+    var copied by remember { mutableStateOf(false) }
 
     Row(
         Modifier.fillMaxWidth(),
@@ -405,27 +407,55 @@ private fun MessageBubble(
                     }
                 }
             }
-                if (onRegenerate != null && !isUser) {
+                if (!isUser) {
                     Spacer(Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onRegenerate() }
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.Refresh,
-                            contentDescription = null,
-                            tint = c.secondaryLabel,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "Regenerate",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.secondaryLabel
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    copyToClipboard(context, message.content)
+                                    copied = true
+                                }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.ContentCopy,
+                                contentDescription = null,
+                                tint = c.secondaryLabel,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                if (copied) "Copied" else "Copy",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = c.secondaryLabel
+                            )
+                        }
+                        if (onRegenerate != null) {
+                            Spacer(Modifier.width(12.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onRegenerate() }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = null,
+                                    tint = c.secondaryLabel,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    "Regenerate",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = c.secondaryLabel
+                                )
+                            }
+                        }
                     }
                 }
         }

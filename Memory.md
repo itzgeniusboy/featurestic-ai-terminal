@@ -79,4 +79,6 @@
 
 - 2026-10-11: v1.12 (code 13). Fix "install chalta rehta hai bahut der tak" (installer hang). Switched in-app self-update from the `ACTION_VIEW`/FileProvider intent (can hang on some OEMs when fed from app cache) to the **PackageInstaller session API**: `installViaSession()` creates a MODE_FULL_INSTALL session, streams the APK, and `commit()`s with a `PendingIntent` broadcast to new `InstallResultReceiver` (registered in manifest, exported=false) which launches the system confirm dialog on `STATUS_PENDING_USER_ACTION` and toasts success/failure otherwise. `installApk()` falls back to the old intent only if the session path throws. Files: UpdateHost.kt, InstallResultReceiver.kt(new), AndroidManifest.xml, app/build.gradle.
 
+- 2026-10-11: v1.13 (code 14). Added a **Copy** action on every AI reply: `MessageBubble` in ChatScreen now shows a "Copy" chip (ContentCopy icon + label, flips to "Copied") next to Regenerate for non-user messages; copies the full `message.content` via existing `copyToClipboard`. Previously only code/command blocks were copyable. File: ChatScreen.kt, app/build.gradle.
+
 
