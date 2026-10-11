@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,12 +24,38 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      - name: Decode signing keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/featurestic.jks"
+
       - name: Build debug APK
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/featurestic.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: featurestic-ai-terminal-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Prepare update metadata
+        run: |
+          VC=$(grep -oP 'versionCode \K[0-9]+' app/build.gradle)
+          VN=$(grep -oP "versionName '\K[^']+" app/build.gradle)
+          printf '{"versionCode":%s,"versionName":"%s"}' "$VC" "$VN" > version.json
+          echo "version.json ->" && cat version.json
+
+      - name: Publish rolling "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ci-latest --yes --cleanup-tag 2>/dev/null || true
+          cp app/build/outputs/apk/debug/app-debug.apk ./app-debug.apk
+          gh release create ci-latest ./app-debug.apk ./version.json \
+            --title "Latest build ($(date -u +%Y-%m-%d))" \
+            --notes "Auto-build from ${{ github.sha }}" \
+            --latest

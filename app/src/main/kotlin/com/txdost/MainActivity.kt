@@ -60,7 +60,10 @@ class MainActivity : ComponentActivity() {
             }
             FeaturesticTheme(darkTheme = darkTheme) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    AppNavigation(initialConvId = convIdFromNotif)
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                        AppNavigation(initialConvId = convIdFromNotif)
+                        UpdateHost()
+                    }
                 }
             }
         }
