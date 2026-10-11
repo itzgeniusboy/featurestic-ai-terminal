@@ -872,7 +872,7 @@ Now answer the user based on these ACTUAL real-time results.
     private suspend fun handleOpencodeCliChat(updatedMessages: List<ChatMessage>, termuxLive: Boolean) {
         if (!termuxLive) {
             _uiState.update { it.copy(isGenerating = false, streamingText = "",
-                error = "OpenCode Zen ke free models Termux ke official 'opencode' CLI se chalte hain — pehle Termux connect karo (Settings > Termux Setup).") }
+                error = "Zen ke free models ke liye Settings > OpenCode Zen me apna API key daalein.\n(API key ke bina Zen free models sirf official app ke andar chalte hain.)") }
             txService?.setGenerating(false)
             return
         }
@@ -881,7 +881,7 @@ Now answer the user based on these ACTUAL real-time results.
             .output
         if (!installed.contains("/opencode")) {
             _uiState.update { it.copy(isGenerating = false, streamingText = "",
-                error = "opencode CLI install nahi hai. Settings > External agent > Install (opencode) par tap karo.") }
+                error = "Zen ke free models ke liye Settings > OpenCode Zen me apna API key daalein.\n(Termux/opencode CLI optional hai — key se app ke andar hi chal jaata hai.)") }
             txService?.setGenerating(false)
             return
         }

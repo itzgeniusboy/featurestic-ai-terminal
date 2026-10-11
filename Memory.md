@@ -71,4 +71,6 @@
 
 - 2026-10-11: v1.8 (code 9). Zen CLI routing is now **key-aware**: `sendMessage` only routes to `handleOpencodeCliChat()` when the `opencode` provider has NO app API key (and not plan mode). With a Zen API key entered, the normal direct HTTP path is used — Zen's key channel is independent of the client-fingerprint free-tier gate (verified via Zen docs + community post-mortems), so free models like `big-pickle` also work with a key without the CLI. File: ChatViewModel.kt, app/build.gradle.
 
+- 2026-10-11: v1.9 (code 10). Zen UX clarity: `handleOpencodeCliChat()` no-key / no-CLI messages now guide the user to **Settings > OpenCode Zen API key** (primary, works fully in-app, no Termux) instead of telling them to install Termux. KNOWN CONSTRAINT: Zen's free models require an API key (anonymous/public Zen free API was closed 2026-09; the free tier is gated to the official client, and third-party spoofing is an anti-abuse control we will NOT do). So "Zen free inside the APK with zero setup" is not legitimately possible — the in-app API-key path (v1.8) is the closest legit option. File: ChatViewModel.kt, app/build.gradle.
+
 
