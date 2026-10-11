@@ -419,6 +419,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 activeProcs.joinToString("\n") { "- ${it.name} (id:${it.id}, log:${it.logFile})" }
             } else "None"
 
+            // ── OpenCode Zen → official opencode CLI (free tier is tied to the client) ──
+            if (prefs.providerId.first() == "opencode" && _uiState.value.agentMode != "plan") {
+                handleOpencodeCliChat(updatedMessages, termuxLive)
+                return@launch
+            }
+
             val sb = StringBuilder()
             val candidates = buildFallbackCandidates()
             var lastError: String? = null
@@ -848,6 +854,76 @@ Now answer the user based on these ACTUAL real-time results.
         saveConversation(msgs)
     }
 
+    // ── OpenCode Zen chat via the official opencode CLI (Termux) ──
+    // Free-tier models (big-pickle etc.) are tied to the official OpenCode client;
+    // we run the real CLI in Termux so the client fingerprint is genuine (no spoofing).
+    private fun opencodeNativeConfig(model: String): String = JSONObject().apply {
+        put("\$schema", "https://opencode.ai/config.json")
+        put("autoupdate", false)
+        put("model", "opencode/$model")
+    }.toString(2)
+
+    private suspend fun handleOpencodeCliChat(updatedMessages: List<ChatMessage>, termuxLive: Boolean) {
+        if (!termuxLive) {
+            _uiState.update { it.copy(isGenerating = false, streamingText = "",
+                error = "OpenCode Zen ke free models Termux ke official 'opencode' CLI se chalte hain — pehle Termux connect karo (Settings > Termux Setup).") }
+            txService?.setGenerating(false)
+            return
+        }
+        val installed = termuxBridge
+            .runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NOT_INSTALLED")
+            .output
+        if (!installed.contains("/opencode")) {
+            _uiState.update { it.copy(isGenerating = false, streamingText = "",
+                error = "opencode CLI install nahi hai. Settings > External agent > Install (opencode) par tap karo.") }
+            txService?.setGenerating(false)
+            return
+        }
+
+        val model = prefs.modelFor("opencode").first().ifBlank { "big-pickle" }
+        val userMsg = updatedMessages.lastOrNull { it.role == "user" }?.content.orEmpty()
+        if (userMsg.isBlank()) {
+            _uiState.update { it.copy(isGenerating = false, streamingText = "") }
+            txService?.setGenerating(false)
+            return
+        }
+
+        termuxBridge.writeFile("~/.config/opencode/opencode.json", opencodeNativeConfig(model))
+        termuxBridge.writeFile("~/opencode_chat.txt", userMsg)
+
+        _uiState.update { it.copy(streamingText = "$model (opencode CLI) chal raha hai...") }
+        termuxBridge.runCommandAndGetOutput(
+            "cd ~ && rm -f ~/opencode_chat.log; nohup sh -c " +
+                "'opencode run \"\$(cat ~/opencode_chat.txt)\" --model opencode/$model --auto' " +
+                "> ~/opencode_chat.log 2>&1 & echo STARTED",
+            15
+        )
+
+        var done = false
+        var iter = 0
+        while (!done && iter < 90) {
+            delay(3000)
+            iter++
+            val tail = termuxBridge
+                .runCommandAndGetOutput("tail -n 20 ~/opencode_chat.log 2>/dev/null").output
+            if (tail.isNotBlank()) {
+                _uiState.update { it.copy(streamingText = "$model:\n" + tail.takeLast(1200)) }
+            }
+            val status = termuxBridge
+                .runCommandAndGetOutput("pgrep -f 'opencode run' >/dev/null && echo RUNNING || echo DONE", 10)
+                .output
+            if (status.contains("DONE")) done = true
+        }
+
+        val raw = termuxBridge
+            .runCommandAndGetOutput("tail -n 300 ~/opencode_chat.log 2>/dev/null").output
+        val answer = cleanTags(raw).ifBlank { "(koi output nahi aaya)" }
+        val finalMsgs = _uiState.value.messages + ChatMessage("assistant", answer)
+        _uiState.update { it.copy(messages = finalMsgs, isGenerating = false, streamingText = "") }
+        txService?.setGenerating(false)
+        saveConversation(finalMsgs)
+    }
+
     // ── EXTERNAL AGENT (opencode) — delegate big builds ─────────
     private val opencodeProviderOrder = listOf(
         "opencode", "openrouter", "groq", "gemini", "mistral", "nvidia"
@@ -865,7 +941,7 @@ Now answer the user based on these ACTUAL real-time results.
             val spec = ProviderRegistry.byId(id)
             if (spec.nativeOllama) continue
             val key = prefs.apiKeyFor(id).first()
-            if (key.isBlank()) continue
+            if (key.isBlank() && id != "opencode") continue
             var model = prefs.modelFor(id).first()
             if (model.isBlank()) {
                 model = llm.getModels(spec, key).getOrNull()
@@ -905,21 +981,26 @@ Now answer the user based on these ACTUAL real-time results.
         }
         val (spec, key, model) = pick
 
-        // 1. Write opencode config using the app's existing key (no new key needed)
-        val config = JSONObject().apply {
-            put("\$schema", "https://opencode.ai/config.json")
-            put("autoupdate", false)
-            put("model", "${spec.id}/$model")
-            put("provider", JSONObject().put(spec.id, JSONObject().apply {
-                put("npm", "@ai-sdk/openai-compatible")
-                put("name", spec.name)
-                put("options", JSONObject().apply {
-                    put("baseURL", spec.baseUrl)
-                    put("apiKey", key)
-                })
-                put("models", JSONObject().put(model, JSONObject()))
-            }))
-        }.toString(2)
+        // 1. opencode config. For OpenCode Zen use the CLI's NATIVE provider
+        //    (free tier is tied to the official client; no custom override).
+        val config = if (spec.id == "opencode") {
+            opencodeNativeConfig(model)
+        } else {
+            JSONObject().apply {
+                put("\$schema", "https://opencode.ai/config.json")
+                put("autoupdate", false)
+                put("model", "${spec.id}/$model")
+                put("provider", JSONObject().put(spec.id, JSONObject().apply {
+                    put("npm", "@ai-sdk/openai-compatible")
+                    put("name", spec.name)
+                    put("options", JSONObject().apply {
+                        put("baseURL", spec.baseUrl)
+                        put("apiKey", key)
+                    })
+                    put("models", JSONObject().put(model, JSONObject()))
+                }))
+            }.toString(2)
+        }
         termuxBridge.writeFile("~/.config/opencode/opencode.json", config)
         termuxBridge.writeFile("~/opencode_task.txt", task)
 
