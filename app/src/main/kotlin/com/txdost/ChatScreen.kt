@@ -372,10 +372,6 @@ private fun MessageBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top
     ) {
-        if (!isUser) {
-            AiAvatar()
-            Spacer(Modifier.width(8.dp))
-        }
         Column(
             Modifier
                 .then(if (isUser) Modifier.widthIn(max = 300.dp) else Modifier.weight(1f))
@@ -448,20 +444,6 @@ private fun MessageBubble(
                     }
                 }
         }
-    }
-}
-
-@Composable
-private fun AiAvatar() {
-    val c = Apple.colors
-    Box(
-        Modifier
-            .size(28.dp)
-            .clip(CircleShape)
-            .background(Brush.linearGradient(listOf(c.blue, c.indigo))),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(Icons.Rounded.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -631,8 +613,6 @@ private fun LinkText(text: String, baseColor: Color) {
 private fun TypingBubble() {
     val c = Apple.colors
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        AiAvatar()
-        Spacer(Modifier.width(8.dp))
         Row(
             Modifier
                 .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp))

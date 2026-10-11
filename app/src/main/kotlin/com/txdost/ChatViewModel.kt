@@ -467,11 +467,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            // ── PLAN MODE: never execute anything, just show the plan ──
+            // ── PLAN MODE: read-only — web search + file inspection, NO changes ──
             if (_uiState.value.agentMode == "plan") {
-                val msgs = _uiState.value.messages + ChatMessage("assistant", cleanTags(aiResponse))
-                _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
-                saveConversation(msgs)
+                handlePlanMode(aiResponse, updatedMessages, termuxLive, procsInfo)
+                return@launch
+            }
+
+            // ── Delegate big builds to the external agent (opencode) ──
+            val buildMatch = Regex("""\[BUILD:(.*?)\]""", RegexOption.DOT_MATCHES_ALL).find(aiResponse)
+            if (buildMatch != null) {
+                handleExternalBuild(buildMatch.groupValues[1].trim())
                 return@launch
             }
 
@@ -718,6 +723,220 @@ Now answer the user based on these ACTUAL real-time results.
     }
 
     // ── Progress banner — plain Unicode, no markdown backticks ──
+    // ── PLAN MODE: read-only. Web search + read-only shell inspection allowed. ──
+    private val planReadOnlyPrefixes = setOf(
+        "ls", "cat", "head", "tail", "grep", "find", "wc", "file", "stat", "pwd",
+        "whoami", "uname", "env", "printenv", "du", "df", "ps", "pgrep", "which",
+        "whereis", "date", "echo", "tree", "realpath", "readlink", "lsblk", "id",
+        "hostname", "sed", "awk", "sort", "uniq", "cut", "tr", "nl", "od", "xxd",
+        "strings", "basename", "dirname", "type", "command", "test", "lsof",
+        "uptime", "free", "vmstat", "getprop"
+    )
+    private val planBlockedSubstrings = listOf(
+        ">", "tee ", "rm ", "rm\t", "mv ", "cp ", "mkdir", "touch", "chmod",
+        "chown", "truncate", "dd ", "ln ", "sudo", "pkg ", "apt", "pip ",
+        "npm ", "yarn", "pnpm", "kill", "pkill", "nohup", "curl", "wget",
+        "git ", "sh -c", "bash -c", "eval", "\$(", "`", " &", "sed -i"
+    )
+
+    private fun isReadOnlyCommand(cmd: String): Boolean {
+        if (cmd.isBlank()) return false
+        if (planBlockedSubstrings.any { cmd.contains(it) }) return false
+        val segments = cmd.split("&&", "||", "|", ";").map { it.trim() }.filter { it.isNotEmpty() }
+        if (segments.isEmpty()) return false
+        return segments.all { seg ->
+            val first = seg.split(Regex("\\s+")).firstOrNull()?.substringAfterLast('/').orEmpty()
+            first in planReadOnlyPrefixes
+        }
+    }
+
+    private suspend fun handlePlanMode(
+        aiResponse: String,
+        updatedMessages: List<ChatMessage>,
+        termuxLive: Boolean,
+        procsInfo: String
+    ) {
+        val observations = StringBuilder()
+
+        // 1. Web searches — allowed
+        val searches = Regex("""\[WEB_SEARCH:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
+            .findAll(aiResponse).toList()
+        if (searches.isNotEmpty()) {
+            _uiState.update { it.copy(streamingText = "🔍 Searching the web...") }
+            searches.forEach { match ->
+                val query = match.groupValues[1].trim()
+                val results = webSearch.search(query, 5)
+                observations.appendLine(webSearch.formatForAI(query, results)).appendLine()
+            }
+        }
+
+        // 2. Read-only commands — allowed; mutating ones are silently ignored
+        val cmds = Regex("""\[TERMUX:(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
+            .findAll(aiResponse).map { it.groupValues[1].trim() }
+            .filter { isReadOnlyCommand(it) }.toList()
+        if (cmds.isNotEmpty() && termuxLive) {
+            _uiState.update { it.copy(streamingText = "🔎 Inspecting files...") }
+            cmds.forEach { cmd ->
+                val r = termuxBridge.runCommandAndGetOutput(cmd, 30)
+                observations.appendLine("$ $cmd").appendLine(r.output.take(2000)).appendLine()
+            }
+        }
+
+        val cleaned = cleanTags(aiResponse).trim()
+
+        // 3. Nothing to inspect → just save the plan
+        if (observations.isBlank()) {
+            val msgs = _uiState.value.messages + ChatMessage(
+                "assistant", cleaned.ifEmpty { "(Plan only — read-only mode.)" }
+            )
+            _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
+            saveConversation(msgs)
+            return
+        }
+
+        // 4. Feed observations back → final plan (no action tags)
+        _uiState.update { it.copy(streamingText = "") }
+        val msgs2 = updatedMessages +
+            ChatMessage("assistant", cleaned.ifEmpty { "[Inspecting...]" }) +
+            ChatMessage(
+                "user",
+                "Read-only observations (Plan mode — nothing was created, changed or started):\n\n" +
+                    "$observations\nNow give the final short plan based on this. Do NOT output any action tags."
+            )
+        val sb = StringBuilder()
+        try {
+            llm.chatStream(
+                apiKey = currentApiKey,
+                model = currentModel,
+                messages = msgs2,
+                systemPrompt = buildSystemPrompt(termuxLive, "", procsInfo),
+                fileContext = ""
+            ).collect { token ->
+                if (!token.startsWith("[ERROR]")) {
+                    sb.append(token)
+                    _uiState.update { it.copy(streamingText = sb.toString()) }
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            return
+        }
+
+        val finalText = sb.toString().ifBlank { cleaned }
+        val msgs = _uiState.value.messages + ChatMessage("assistant", finalText)
+        _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
+        saveConversation(msgs)
+    }
+
+    // ── EXTERNAL AGENT (opencode) — delegate big builds ─────────
+    private val opencodeProviderOrder = listOf(
+        "opencode", "openrouter", "groq", "gemini", "mistral", "nvidia"
+    )
+
+    private fun postAssistant(text: String) {
+        val msgs = _uiState.value.messages + ChatMessage("assistant", text)
+        _uiState.update { it.copy(messages = msgs, isGenerating = false, streamingText = "") }
+        saveConversation(msgs)
+    }
+
+    // Reuse the user's EXISTING app keys — never ask for a separate key.
+    private suspend fun pickExternalProvider(): Triple<ProviderSpec, String, String>? {
+        for (id in opencodeProviderOrder) {
+            val spec = ProviderRegistry.byId(id)
+            if (spec.nativeOllama) continue
+            val key = prefs.apiKeyFor(id).first()
+            if (key.isBlank()) continue
+            var model = prefs.modelFor(id).first()
+            if (model.isBlank()) {
+                model = llm.getModels(spec, key).getOrNull()
+                    ?.firstOrNull { it.free }?.id.orEmpty()
+            }
+            if (model.isBlank()) continue
+            return Triple(spec, key, model)
+        }
+        return null
+    }
+
+    private suspend fun handleExternalBuild(task: String) {
+        if (!_uiState.value.termuxConnected) {
+            postAssistant("⚠️ External agent ke liye Termux online hona chahiye.")
+            return
+        }
+
+        val installed = termuxBridge
+            .runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NOT_INSTALLED")
+            .output.contains("/opencode")
+        if (!installed) {
+            postAssistant(
+                "🔌 **External agent (opencode) install nahi hai.**\n\n" +
+                    "Settings → **External agent** → *Install* par tap karein (one tap). " +
+                    "Uske baad yehi task dobara bhejein."
+            )
+            return
+        }
+
+        val pick = pickExternalProvider()
+        if (pick == null) {
+            postAssistant(
+                "🔑 Koi provider key nahi mili. Pehle Settings me kisi free provider " +
+                    "(OpenCode Zen / OpenRouter / Groq …) ki key daalein aur ek model chunein."
+            )
+            return
+        }
+        val (spec, key, model) = pick
+
+        // 1. Write opencode config using the app's existing key (no new key needed)
+        val config = JSONObject().apply {
+            put("\$schema", "https://opencode.ai/config.json")
+            put("autoupdate", false)
+            put("model", "${spec.id}/$model")
+            put("provider", JSONObject().put(spec.id, JSONObject().apply {
+                put("npm", "@ai-sdk/openai-compatible")
+                put("name", spec.name)
+                put("options", JSONObject().apply {
+                    put("baseURL", spec.baseUrl)
+                    put("apiKey", key)
+                })
+                put("models", JSONObject().put(model, JSONObject()))
+            }))
+        }.toString(2)
+        termuxBridge.writeFile("~/.config/opencode/opencode.json", config)
+        termuxBridge.writeFile("~/opencode_task.txt", task)
+
+        // 2. Launch headless, stream to a log file
+        _uiState.update { it.copy(streamingText = "🧠 opencode chal raha hai... (${spec.id}/$model)") }
+        termuxBridge.runCommandAndGetOutput(
+            "cd ~ && nohup sh -c " +
+                "'opencode run \"\$(cat ~/opencode_task.txt)\" --model ${spec.id}/$model --auto --print-logs' " +
+                "> ~/opencode_run.log 2>&1 & echo STARTED",
+            15
+        )
+
+        // 3. Poll the log until the process exits (or ~5 min)
+        var done = false
+        var iter = 0
+        while (!done && iter < 60) {
+            delay(5000)
+            iter++
+            val tail = termuxBridge
+                .runCommandAndGetOutput("tail -n 40 ~/opencode_run.log 2>/dev/null").output
+            if (tail.isNotBlank()) {
+                _uiState.update { it.copy(streamingText = "🧠 opencode:\n\n" + tail.takeLast(1600)) }
+            }
+            val status = termuxBridge
+                .runCommandAndGetOutput("pgrep -f 'opencode run' >/dev/null && echo RUNNING || echo DONE", 10)
+                .output
+            if (status.contains("DONE")) done = true
+        }
+
+        val finalLog = termuxBridge
+            .runCommandAndGetOutput("tail -n 150 ~/opencode_run.log 2>/dev/null").output.trim()
+        val shown = if (finalLog.length > 4000) finalLog.takeLast(4000) else finalLog
+        postAssistant(
+            "🧠 **External agent (opencode) — ${if (done) "complete" else "still running"}**  " +
+                "(`${spec.id}/$model`)\n\n```\n${shown.ifBlank { "(no output)" }}\n```"
+        )
+    }
+
     private fun updateProgress(
         completedSteps: List<String>,
         currentStep: String,
@@ -745,6 +964,7 @@ Now answer the user based on these ACTUAL real-time results.
         .replace(Regex("""\[STOP:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
         .replace(Regex("""\[TOOL:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
         .replace(Regex("""\[WEB_SEARCH:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
+        .replace(Regex("""\[BUILD:.*?\]""", RegexOption.DOT_MATCHES_ALL), "")
         .trim()
 
     private fun tryCreateFileFromResponse(response: String): String? {
@@ -1047,7 +1267,10 @@ Now answer the user based on these ACTUAL real-time results.
 
     private fun buildSystemPrompt(termuxConnected: Boolean, deviceInfo: String, activeProcs: String): String {
         val base = currentSystemPrompt.ifBlank {
-            "You are Featurestic AI Terminal, an elite AI assistant and terminal controller running on Android. Be direct and execute tasks immediately. Keep replies short and clean — never send long, unnecessary messages."
+            "You are Featurestic AI Terminal — a senior full-stack software engineer agent running inside Android/Termux. " +
+                "You build and ship COMPLETE software: Android/Kotlin apps, web apps, Node/Python tools, scripts, bots, CLIs — not just bots. " +
+                "Be direct and act immediately: inspect the workspace, write the real files, install dependencies, run builds and tests, and fix errors yourself until it works. " +
+                "Think like a lead engineer: recon → plan → implement → build → verify. Keep chat replies short and clean — never send long, unnecessary messages."
         }
 
         val enabledSkills = _uiState.value.skills.filter { it.enabled }
@@ -1056,11 +1279,48 @@ Now answer the user based on these ACTUAL real-time results.
                 enabledSkills.joinToString("\n") { "- ${it.instruction}" }
 
         val modeBlock = if (_uiState.value.agentMode == "plan") {
-            "\n\n=== MODE: PLAN ===\nYou are in PLAN mode. Do NOT execute anything and do NOT output any action tags " +
-                "([TERMUX:], [INSTALL:], <<<WRITE:...>>>, [BG:], [STOP:]). Reply with only a short, clean plan."
+            "\n\n=== MODE: PLAN (read-only) ===\nYou are in PLAN mode. You may INSPECT but must NOT change or run anything.\n" +
+                "ALLOWED: [WEB_SEARCH:query] and READ-ONLY commands like [TERMUX:ls -la ~], [TERMUX:cat file], " +
+                "[TERMUX:grep -r TODO .], [TERMUX:find . -name '*.kt'], [TERMUX:tree], [TERMUX:du -sh *]. " +
+                "Use these ONLY to inspect and understand, then reply with a short clean plan.\n" +
+                "FORBIDDEN (never output these in plan mode): [INSTALL:], <<<WRITE:...>>>, [BG:], [STOP:], " +
+                "and any command that creates/changes/deletes files or starts/stops/mutates anything " +
+                "(echo>, rm, mv, cp, mkdir, sed -i, pkg, pip, npm, git, curl, kill, etc.)."
         } else {
             "\n\n=== MODE: BUILD ===\nYou may execute actions with action tags when needed. Keep the reply short and clean."
         }
+
+        // ── General app-building + delegation to the external agent ──
+        val builderSection = """
+
+╔══════════════════════════════════════════╗
+║      APP BUILDER — GENERAL WORKFLOW      ║
+╚══════════════════════════════════════════╝
+You are NOT limited to bots — build ANY software the user asks for:
+Android/Kotlin apps, web apps, Node / Python / Flask tools, CLIs, scripts, bots.
+
+WORKFLOW (follow in order):
+1. RECON    — inspect first: [TERMUX:ls -la ~/project] , [TERMUX:cat file]
+2. SCAFFOLD — create the real files: <<<WRITE:path>>> full content <<<END>>>
+3. DEPS     — system: [INSTALL:nodejs] ; language: [TERMUX:pip install ...] / [TERMUX:npm install ...]
+4. BUILD/RUN— run it (see LONG JOBS below)
+5. FIX      — read the error, fix the file, run again. Repeat until it works.
+Do the WHOLE thing; never just describe it.
+
+LONG JOBS (builds / installs that take minutes):
+Never block on a long command. Start it in background, then poll the log:
+   [BG:Build|cd ~/project && <build cmd> 2>&1 | tee ~/build.log|~/build.log]
+   [TERMUX:sleep 5 && tail -n 40 ~/build.log]
+Repeat the tail until you see success or an error, then fix + rebuild.
+
+DELEGATE BIG BUILDS TO A FULL AGENT (opencode):
+For large multi-file projects or "build the whole app", hand off to the
+external coding agent installed in Termux:
+   [BUILD:complete task description]
+The app runs opencode (headless) using the user's EXISTING API key and streams
+its log back to this chat. Use ONE clear, complete prompt. First check install:
+   [TERMUX:command -v opencode || echo NOT_INSTALLED]
+"""
 
         // ── Web Search — ALWAYS available ──────────────────────────
         val webSearchSection = """
@@ -1106,7 +1366,7 @@ HARD RULES:
         val procsSection  = if (activeProcs.isNotBlank() && activeProcs != "None")
             "\n── Active Processes ──\n$activeProcs\n" else ""
 
-        return base + skillsBlock + modeBlock + webSearchSection + fileSection + deviceSection + procsSection + """
+        return base + skillsBlock + modeBlock + builderSection + webSearchSection + fileSection + deviceSection + procsSection + """
 
 ╔══════════════════════════════════════════╗
 ║     TERMUX DIRECT CONTROL — ONLINE       ║

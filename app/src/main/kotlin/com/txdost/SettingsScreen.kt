@@ -207,6 +207,36 @@ fun SettingsScreen(
         }
     }
 
+    // ── External agent (opencode) ────────────────────────────────
+    val bridge = remember { com.txdost.data.TermuxBridge(ctx) }
+    var extInstalled by remember { mutableStateOf<Boolean?>(null) }
+    var extBusy by remember { mutableStateOf(false) }
+    var extLog by remember { mutableStateOf("") }
+    fun checkExt() {
+        scope.launch {
+            extBusy = true
+            extLog = "Checking..."
+            val r = bridge.runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NO")
+            extInstalled = r.output.contains("/opencode")
+            extLog = if (extInstalled == true) "Installed ✓" else "Not installed"
+            extBusy = false
+        }
+    }
+    fun installExt() {
+        scope.launch {
+            extBusy = true
+            extLog = "Installing nodejs (may take a few minutes)..."
+            bridge.installPackage("nodejs")
+            extLog = "Installing opencode-termux via npm..."
+            bridge.runCommandAndGetOutput("npm install -g opencode-termux", 600)
+            val r = bridge.runCommandAndGetOutput("command -v opencode 2>/dev/null || echo NO")
+            extInstalled = r.output.contains("/opencode")
+            extLog = if (extInstalled == true) "Installed ✓" else "Install finished — not detected yet. Try Check."
+            extBusy = false
+        }
+    }
+    LaunchedEffect(Unit) { checkExt() }
+
     Column(Modifier.fillMaxSize().background(c.bg)) {
         AppleTopBar(title = "Settings", onBack = onBack)
         Column(
@@ -336,6 +366,54 @@ fun SettingsScreen(
                                 Icon(if (firecrawlVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, null, tint = c.secondaryLabel)
                             }
                         }
+                    )
+                }
+            }
+
+            AppleSectionHeader("External agent")
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "opencode",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = c.label,
+                        modifier = Modifier.weight(1f)
+                    )
+                    AppleBadge(
+                        text = when (extInstalled) {
+                            true -> "Installed"; false -> "Not installed"; null -> "…"
+                        },
+                        active = extInstalled == true
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Bade tasks (poori app banane + build) ke liye app ek full coding agent " +
+                        "ko Termux me chalata hai. Aapki wahi API key use hoti hai — alag key nahi chahiye.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = c.secondaryLabel
+                )
+                if (extLog.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(extLog, style = MaterialTheme.typography.labelSmall, color = c.secondaryLabel)
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    AppleButton(
+                        "Install",
+                        { installExt() },
+                        Modifier.weight(1f),
+                        style = AppleButtonStyle.Tinted,
+                        enabled = !extBusy
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    AppleButton(
+                        "Check",
+                        { checkExt() },
+                        Modifier.weight(1f),
+                        style = AppleButtonStyle.Tinted,
+                        enabled = !extBusy,
+                        loading = extBusy
                     )
                 }
             }
