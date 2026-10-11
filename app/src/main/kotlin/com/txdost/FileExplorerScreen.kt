@@ -72,7 +72,7 @@ fun FileExplorerScreen(
         error = ""
         files = emptyList()
         try {
-            val expandedPath = if (path == "~") "\$HOME" else path
+            val expandedPath = if (path == "~") "\$HOME" else shellQuote(path)
             val result = viewModel.runCommand("ls -la $expandedPath 2>&1 | tail -n +2")
             if (result.startsWith("ls:") || result.contains("No such file")) {
                 error = result; loading = false; return
@@ -101,7 +101,7 @@ fun FileExplorerScreen(
     suspend fun loadFile(path: String) {
         loading = true
         try {
-            val result = viewModel.runCommand("cat '$path' 2>&1")
+            val result = viewModel.runCommand("cat ${shellQuote(path)} 2>&1")
             fileContent = result
             editContent = result
         } catch (e: Exception) {
@@ -331,3 +331,6 @@ private fun formatSize(bytes: String): String {
         else -> "${b / (1024 * 1024 * 1024)}GB"
     }
 }
+
+// Shell-safe single-quoted path (spaces, quotes, $ etc. safe).
+private fun shellQuote(path: String): String = "'" + path.replace("'", "'\\''") + "'"

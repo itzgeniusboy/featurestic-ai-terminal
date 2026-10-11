@@ -40,6 +40,21 @@ os.environ.setdefault("TMPDIR", f"{_PFX}/tmp")
 os.environ["DEBIAN_FRONTEND"] = "noninteractive"
 _ENV = os.environ.copy()
 
+# Protected paths — /write sirf user/data areas me allowed (system files safe).
+_TERMUX_FILES = "/data/data/com.termux/files"
+_FORBID_WRITE = ("/system", "/vendor", "/proc", "/sys", "/dev", "/etc", "/bin",
+                 "/sbin", "/data/app", "/data/system", "/data/misc", "/data/tombstones")
+
+
+def is_forbidden_write(path):
+    ap = os.path.abspath(path)
+    if ap.startswith("/data/data/") and not ap.startswith(_TERMUX_FILES):
+        return True
+    for p in _FORBID_WRITE:
+        if ap == p or ap.startswith(p + "/"):
+            return True
+    return False
+
 
 def run_cmd(cmd, timeout=60, workdir=None):
     wd = workdir or os.environ["HOME"]
@@ -313,10 +328,14 @@ class H(BaseHTTPRequestHandler):
             if not path:
                 self._send(400, {"error": "path required"})
                 return
+            ap = os.path.abspath(path)
+            if is_forbidden_write(ap):
+                self._send(200, {"success": False, "error": f"Refused (protected path): {ap}"})
+                return
             try:
-                os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-                open(path, "w", encoding="utf-8").write(content)
-                self._send(200, {"success": True, "message": f"Written: {path}", "size": len(content)})
+                os.makedirs(os.path.dirname(ap), exist_ok=True)
+                open(ap, "w", encoding="utf-8").write(content)
+                self._send(200, {"success": True, "message": f"Written: {ap}", "size": len(content)})
             except Exception as e:
                 self._send(200, {"success": False, "error": str(e)})
         elif self.path == "/kill":

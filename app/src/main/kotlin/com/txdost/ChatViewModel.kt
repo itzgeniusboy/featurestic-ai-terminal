@@ -1126,14 +1126,28 @@ Now answer the user based on these ACTUAL real-time results.
         return verbs.any { t.lowercase().contains(it) }
     }
 
-    private fun tryCreateFileFromResponse(response: String): String? {
+    private suspend fun tryCreateFileFromResponse(response: String): String? {
         return try {
             val fileName = Regex("""\[FILE:(.*?)\]""").find(response)?.groupValues?.get(1)?.trim() ?: return null
             val content  = Regex("""\[CONTENT\](.*?)\[/CONTENT\]""", RegexOption.DOT_MATCHES_ALL)
                 .find(response)?.groupValues?.get(1)?.trim() ?: return null
-            val result = fileManager.writeFile(fileName, content)
-            if (result.isSuccess) fileName else null
+            writeToCorrectRoot(fileName, content)
         } catch (e: Exception) { null }
+    }
+
+    // Ek hi jagah decide karo kaha likhna hai:
+    //  · absolute / phone path (`/...`, `~...`) → real filesystem (Termux)
+    //  · relative naam → app ka private workspace (sandboxed)
+    // Absolute path ko workspace me nest hone se bachata hai.
+    private suspend fun writeToCorrectRoot(path: String, content: String): String? {
+        val p = path.trim()
+        val isAbsolute = p.startsWith("/") || p.startsWith("~")
+        if (!isAbsolute) {
+            val res = fileManager.writeFile(p, content)
+            return if (res.isSuccess) p else null
+        }
+        if (termuxBridge.isSharedStoragePath(p) && !termuxBridge.ensureStorageAccess()) return null
+        return if (termuxBridge.writeFile(p, content)) p else null
     }
 
     private suspend fun handleAllActions(
@@ -1251,11 +1265,14 @@ Now answer the user based on these ACTUAL real-time results.
         writeList.forEach { match ->
             val path    = match.groupValues[1].trim()
             val content = match.groupValues[2].trim()
-            updateProgress(completedSteps, "📝 Writing: $path", totalSteps, stepsDone)
-            val ok   = termuxBridge.writeFile(path, content)
-            val line = if (ok) "✅ Written: $path" else "❌ Write failed: $path"
-            actionResults.appendLine("📝 Writing: $path")
-            actionResults.appendLine(if (ok) "✅ Written" else "❌ Failed").appendLine()
+            updateProgress(completedSteps, "Writing: $path", totalSteps, stepsDone)
+            val storageOk = !termuxBridge.isSharedStoragePath(path) || termuxBridge.ensureStorageAccess()
+            val ok   = storageOk && termuxBridge.writeFile(path, content)
+            val line = if (ok) "Written: $path"
+                       else if (!storageOk) "Storage access chahiye: $path (Termux me termux-setup-storage)"
+                       else "Write failed: $path"
+            actionResults.appendLine("Writing: $path")
+            actionResults.appendLine(if (ok) "Written" else "Failed").appendLine()
             completedSteps.add(line); stepsDone++
         }
 

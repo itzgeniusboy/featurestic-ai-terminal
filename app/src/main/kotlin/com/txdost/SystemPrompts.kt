@@ -156,8 +156,34 @@ HARD RULES:
 [/CONTENT]
 """
 
+        // ── Paths & storage — teen roots, clearly ──────────────────
+        val pathSection = """
+
+╔══════════════════════════════════════════╗
+║            PATHS & STORAGE                ║
+╚══════════════════════════════════════════╝
+THREE SEPARATE ROOTS — do not confuse them:
+
+1. ~/...  → Termux home (/data/data/com.termux/files/home).
+   Default for scripts, projects, logs.
+
+2. <<<WRITE:path>>> and [FILE:path]:
+   · Relative name (app.py)      → app-private workspace (NOT phone storage)
+   · Absolute /... or ~/...       → real filesystem via Termux
+
+3. Phone / shared storage:
+   · /sdcard == /storage/emulated/0 == ~/storage/shared
+   · Needs ONE-TIME Termux storage permission. If a /sdcard write fails,
+     run [TERMUX:termux-setup-storage] once, then retry.
+
+RULES:
+→ If the user gives a full path (e.g. /storage/emulated/0/x.py), ALWAYS use
+  that absolute path — never silently reduce it to a bare filename.
+→ Prefer /sdcard/Download or ~/storage/shared for user-visible files.
+"""
+
         if (!termuxConnected) {
-            return base + toneBlock + skillsBlock + modeBlock + webSearchSection + fileSection + """
+            return base + toneBlock + skillsBlock + modeBlock + webSearchSection + fileSection + pathSection + """
 
 ⚠ STATUS: Termux OFFLINE
 → Web Search and File creation are available.
@@ -170,7 +196,7 @@ HARD RULES:
             "\n── Active Processes ──\n$activeProcs\n" else ""
 
         return base + toneBlock + skillsBlock + modeBlock + builderSection + reSection +
-            webSearchSection + fileSection + deviceSection + procsSection + """
+            webSearchSection + fileSection + pathSection + deviceSection + procsSection + """
 
 ╔══════════════════════════════════════════╗
 ║     TERMUX DIRECT CONTROL — ONLINE       ║

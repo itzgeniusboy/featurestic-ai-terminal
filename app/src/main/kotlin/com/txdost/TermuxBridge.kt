@@ -206,6 +206,24 @@ class TermuxBridge(private val context: Context) {
         r.output.contains("FS_OK")
     }
 
+    // Kya ye path phone/shared storage ka hai? (/sdcard == /storage/emulated/0 == ~/storage/shared)
+    fun isSharedStoragePath(path: String): Boolean {
+        val p = path.trim()
+        return p.startsWith("/sdcard") || p.startsWith("/storage") || p.startsWith("~/storage")
+    }
+
+    // Shared storage pakka karo — zarurat pade to Termux se permission maango, phir wait karo.
+    // false = permission nahi mili (user ne deny kiya ya Termux install nahi).
+    suspend fun ensureStorageAccess(): Boolean {
+        if (hasStorageAccess()) return true
+        requestStorageSetup()
+        repeat(6) {
+            delay(1500)
+            if (hasStorageAccess()) return true
+        }
+        return false
+    }
+
     // File Termux mein likho
     suspend fun writeFile(path: String, content: String): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -346,8 +364,7 @@ class TermuxBridge(private val context: Context) {
     // Clear log file
     suspend fun clearLogFile(logFile: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val expanded = logFile.replace("~",
-                System.getenv("HOME") ?: "/data/data/com.termux/files/home")
+            val expanded = if (logFile.startsWith("~")) TERMUX_HOME + logFile.drop(1) else logFile
             val body = JSONObject()
                 .put("command", "> '$expanded' && echo ok")
                 .put("timeout", 5)
